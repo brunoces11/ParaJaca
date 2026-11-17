@@ -1,0 +1,199 @@
+{
+  "formatVersion": 1,
+  "id": "scene-reference-7-layers",
+  "name": "Reference Scene 7 Layers",
+  "reference": {
+    "width": 1920,
+    "height": 1080
+  },
+  "pointOfInterest": {
+    "x": 0.5,
+    "y": 0.5
+  },
+  "posterAssetId": null,
+  "defaultVariantId": "variant-default",
+  "assets": [
+    {
+      "id": "d91d93b9-1141-41a3-b9aa-6930c7eda685",
+      "name": "Layer 1 - Sky and Mountains",
+      "type": "png",
+      "width": 1920,
+      "height": 1080,
+      "path": "assets/d91d93b9-1141-41a3-b9aa-6930c7eda685.png"
+    },
+    {
+      "id": "647be694-4567-4a6c-95de-79256cb8fe8d",
+      "name": "Layer 2 - Distant Ridge",
+      "type": "png",
+      "width": 1920,
+      "height": 1080,
+      "path": "assets/647be694-4567-4a6c-95de-79256cb8fe8d.png"
+    },
+    {
+      "id": "78060738-dcc7-4320-9fb7-f3d5e710d278",
+      "name": "Layer 3 - Hills and Cottages",
+      "type": "png",
+      "width": 1920,
+      "height": 1080,
+      "path": "assets/78060738-dcc7-4320-9fb7-f3d5e710d278.png"
+    },
+    {
+      "id": "9d0c29f3-d2c9-4f47-94b7-ce2421193cda",
+      "name": "Layer 4 - Townhouses and Buildings",
+      "type": "png",
+      "width": 1920,
+      "height": 1080,
+      "path": "assets/9d0c29f3-d2c9-4f47-94b7-ce2421193cda.png"
+    },
+    {
+      "id": "fd5d84f0-74c5-475c-a017-20d7d4644fed",
+      "name": "Layer 5 - Plaza Terrace and Fountain",
+      "type": "png",
+      "width": 1920,
+      "height": 1080,
+      "path": "assets/fd5d84f0-74c5-475c-a017-20d7d4644fed.png"
+    },
+    {
+      "id": "aac87d8b-0369-4273-a166-aa080d89a2d0",
+      "name": "Layer 6 - Plaza Tree, Bench and Lamp",
+      "type": "png",
+      "width": 1920,
+      "height": 1080,
+      "path": "assets/aac87d8b-0369-4273-a166-aa080d89a2d0.png"
+    },
+    {
+      "id": "8e8075b3-8077-493b-a5f2-6e554f99bfa0",
+      "name": "Layer 7 - Close Framing Leaves",
+      "type": "png",
+      "width": 1920,
+      "height": 1080,
+      "path": "assets/8e8075b3-8077-493b-a5f2-6e554f99bfa0.png"
+    }
+  ],
+  "variants": [
+    {
+      "id": "variant-default",
+      "name": "default",
+      "layers": [
+        {
+          "id": "layer-1",
+          "assetId": "d91d93b9-1141-41a3-b9aa-6930c7eda685",
+          "placement": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1080
+          },
+          "depth": null,
+          "focusMode": "dynamic",
+          "fixedBlur": 0,
+          "order": 0
+        },
+        {
+          "id": "layer-2",
+          "assetId": "647be694-4567-4a6c-95de-79256cb8fe8d",
+          "placement": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1080
+          },
+          "depth": null,
+          "focusMode": "dynamic",
+          "fixedBlur": 0,
+          "order": 1
+        },
+        {
+          "id": "layer-3",
+          "assetId": "78060738-dcc7-4320-9fb7-f3d5e710d278",
+          "placement": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1080
+          },
+          "depth": null,
+          "focusMode": "dynamic",
+          "fixedBlur": 0,
+          "order": 2
+        },
+        {
+          "id": "layer-4",
+          "assetId": "9d0c29f3-d2c9-4f47-94b7-ce2421193cda",
+          "placement": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1080
+          },
+          "depth": null,
+          "focusMode": "dynamic",
+          "fixedBlur": 0,
+          "order": 3
+        },
+        {
+          "id": "layer-5",
+          "assetId": "fd5d84f0-74c5-475c-a017-20d7d4644fed",
+          "placement": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1080
+          },
+          "depth": null,
+          "focusMode": "dynamic",
+          "fixedBlur": 0,
+          "order": 4
+        },
+        {
+          "id": "layer-6",
+          "assetId": "aac87d8b-0369-4273-a166-aa080d89a2d0",
+          "placement": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1080
+          },
+          "depth": null,
+          "focusMode": "dynamic",
+          "fixedBlur": 0,
+          "order": 5
+        },
+        {
+          "id": "layer-7",
+          "assetId": "8e8075b3-8077-493b-a5f2-6e554f99bfa0",
+          "placement": {
+            "x": 0,
+            "y": 0,
+            "width": 1920,
+            "height": 1080
+          },
+          "depth": null,
+          "focusMode": "dynamic",
+          "fixedBlur": 0,
+          "order": 6
+        }
+      ],
+      "optics": {
+        "focus": 50,
+        "aperture": 2.8,
+        "tolerance": 5,
+        "maxBlur": 24,
+        "focusRange": [0, 100],
+        "focusSpeed": 0.5,
+        "breathing": 0
+      },
+      "motion": {
+        "intensity": 80,
+        "smoothing": 0.5,
+        "axisY": true,
+        "anchor": "infinity",
+        "drift": false
+      },
+      "quality": {
+        "preset": "auto",
+        "fpsTarget": 60
+      }
+    }
+  ]
+}

@@ -1,0 +1,1116 @@
+PARAJACA — REGRAS DE CÓDIGO (CONTRATO)
+Versão 1.0 — 2026-11-17
+Derivado de: ParaJaca — Blueprint do projeto v1.0
+
+======================================================================
+0. COMO USAR ESTE ARQUIVO
+======================================================================
+
+0.1 Este arquivo é o CONTRATO DE CÓDIGO. Todo código do projeto obedece a ele.
+0.2 O arquivo FASES_DE_IMPLEMENTACAO.txt diz O QUE fazer e EM QUE ORDEM.
+    Este arquivo diz COMO escrever. Em conflito sobre "como", vale este arquivo.
+    Em conflito sobre "o que/quando", vale FASES_DE_IMPLEMENTACAO.txt.
+0.3 Palavras normativas:
+    - DEVE / NUNCA: obrigatório. Violar é erro.
+    - PODE: permitido, não obrigatório.
+    - (calibrar): valor inicial. NÃO altere sem medição pedida pelo usuário.
+0.4 Se uma regra não cobre o caso: escolha a solução MAIS SIMPLES que respeite
+    as regras existentes. Se ainda houver dúvida que afete formato de dados, API
+    pública, fórmula ou desempenho: PARE e pergunte ao usuário. Não invente.
+0.5 Nenhum nome, assinatura, constante ou fórmula definida aqui pode ser
+    renomeado, reordenado ou "melhorado" sem pedido explícito do usuário.
+
+======================================================================
+1. STACK E AMBIENTE
+======================================================================
+
+1.1 Linguagem: JavaScript, ES modules (import/export), arquivos .js.
+1.2 Tipos: JSDoc em todo código. Checagem com TypeScript apenas como ferramenta
+    (checkJs + noEmit). `npm run typecheck` DEVE terminar com 0 erros.
+1.3 Renderização: WebGL2 + GLSL ES 3.0 ("#version 300 es"). Sem bibliotecas.
+1.4 Núcleo (src/core/**) e player: ZERO dependências de execução.
+1.5 Estúdio (src/studio/**): HTML, CSS e JS puros. Única dependência de
+    execução permitida: fflate (só importada por src/studio/zip.js).
+1.6 Ferramentas: Node.js >= 22, typescript (devDependency), vite (devDependency),
+    node:test para testes. Playwright: proibido até o usuário pedir.
+1.7 PROIBIDO no projeto inteiro: React, Preact, GSAP, WebAssembly, WebGPU,
+    Three.js, jQuery, lodash, qualquer framework de UI, qualquer biblioteca de
+    estado, CSS-in-JS, TypeScript como linguagem (.ts), JSX.
+1.8 ES modules não funcionam via file://. Desenvolvimento SEMPRE por
+    `npm run dev` (Vite).
+
+1.9 package.json (conteúdo obrigatório; versões podem ser as estáveis atuais):
+    {
+      "name": "parajaca",
+      "version": "0.1.0",
+      "private": true,
+      "type": "module",
+      "engines": { "node": ">=22" },
+      "scripts": {
+        "dev": "vite",
+        "typecheck": "tsc -p tsconfig.json",
+        "test": "node --test \"tests/**/*.test.js\"",
+        "check": "npm run typecheck && npm test",
+        "build:player": "vite build"
+      },
+      "devDependencies": { "typescript": "...", "vite": "...", "@types/node": "..." },
+      "dependencies": { }            // fflate entra só na fase C
+    }
+
+1.10 tsconfig.json (conteúdo obrigatório):
+    {
+      "compilerOptions": {
+        "target": "ES2022",
+        "module": "ES2022",
+        "moduleResolution": "Bundler",
+        "lib": ["ES2022", "DOM", "DOM.Iterable"],
+        "allowJs": true,
+        "checkJs": true,
+        "noEmit": true,
+        "strict": true,
+        "skipLibCheck": true,
+        "types": ["node"]
+      },
+      "include": ["src/**/*.js", "tests/**/*.js", "demo/**/*.js"]
+    }
+    Observação: "types": ["node"] exige a devDependency @types/node.
+
+1.11 vite.config.js (conteúdo obrigatório):
+    import { defineConfig } from 'vite';
+    export default defineConfig({
+      build: {
+        outDir: 'dist/player',
+        lib: {
+          entry: 'src/core/player.js',
+          formats: ['es'],
+          fileName: () => 'parajaca-player.js'
+        }
+      }
+    });
+
+======================================================================
+2. ESTRUTURA DE PASTAS E ARQUIVOS
+======================================================================
+
+2.1 Estrutura alvo (arquivo só é criado na etapa que o implementa):
+
+    parajaca/
+      package.json, tsconfig.json, vite.config.js, .gitignore
+      AGENTS.md, BLUEPRINT.md, REGRAS_DE_CODIGO.txt, FASES_DE_IMPLEMENTACAO.txt
+      src/core/errors.js
+      src/core/scene/model.js
+      src/core/scene/validate.js
+      src/core/optics.js
+      src/core/motion.js
+      src/core/sources/image-source.js
+      src/core/sources/svg-source.js
+      src/core/sources/mask.js
+      src/core/render/renderer.js
+      src/core/render/pyramid.js
+      src/core/render/shaders.js
+      src/core/render/resources.js
+      src/core/quality/requirements.js
+      src/core/quality/budget.js
+      src/core/quality/presets.js
+      src/core/quality/governor.js
+      src/core/framing.js
+      src/core/player.js
+      src/studio/index.html
+      src/studio/studio.css
+      src/studio/app.js
+      src/studio/store.js
+      src/studio/strings.js
+      src/studio/storage.js
+      src/studio/import.js
+      src/studio/zip.js
+      src/studio/poster.js
+      src/studio/diagnostics.js
+      src/studio/panels/<nome>-panel.js
+      demo/index.html
+      demo/main.js
+      demo/scene.json
+      demo/assets/<assetId>.png
+      demo/calibration.html, demo/calibration.js   (fase A2)
+      tests/<modulo>.test.js
+
+2.2 Arquivos acrescentados ao blueprint (e só estes):
+    - src/core/errors.js: classe de erro e códigos (seção 7.3 do blueprint).
+    - src/core/framing.js: enquadramento e margem de movimento (função pura).
+    - src/studio/index.html, studio.css, store.js, import.js.
+    - demo/index.html, demo/main.js, demo/calibration.*.
+    NUNCA crie outros arquivos de código fora desta lista sem pedido do usuário.
+    NUNCA crie arquivos de plano, notas, resumo ou TODO.
+
+2.3 .gitignore: node_modules/, dist/, *.log
+
+======================================================================
+3. DIREÇÃO DAS DEPENDÊNCIAS (IMPORTS)
+======================================================================
+
+3.1 Tabela de imports de EXECUÇÃO permitidos (nada além disto):
+
+    scene/model.js       → nada
+    scene/validate.js    → ./model.js
+    optics.js            → nada
+    motion.js            → nada
+    framing.js           → nada
+    errors.js            → nada
+    quality/presets.js   → nada
+    quality/budget.js    → nada
+    quality/requirements.js → nada
+    quality/governor.js  → ./presets.js
+    sources/*.js         → ../errors.js, outros arquivos de sources/
+    render/*.js          → ../errors.js, outros arquivos de render/
+    player.js            → qualquer arquivo de src/core/
+    studio/**            → ../core/player.js, ../core/errors.js,
+                           ../core/scene/*.js, ../core/optics.js (só para
+                           exibir valores), outros arquivos de studio/, fflate
+    demo/main.js         → ../src/core/player.js
+    demo/calibration.js  → ../src/core/render/renderer.js, ../src/core/sources/*.js,
+                           ../src/core/quality/requirements.js, ../src/core/optics.js
+                           (ferramenta de calibração da fase A2; usa a API do
+                           renderer, nunca gl.* direto)
+    tests/**             → o módulo testado (somente módulos puros e errors.js)
+
+3.2 Imports só de TIPO em JSDoc são permitidos entre quaisquer módulos:
+      /** @typedef {import('./scene/model.js').Layer} Layer */
+    Isso não cria dependência de execução.
+3.3 NUNCA: core importar studio; render/sources importar player; módulo puro
+    importar módulo com DOM; import circular.
+3.4 Somente src/core/render/** chama a API WebGL (gl.*). O estúdio e o player
+    NUNCA chamam gl.* diretamente. getContext('webgl2') só em render/resources.js.
+3.5 Imports com caminho relativo e extensão ".js" explícita:
+      import { computeSigmaRef } from './optics.js';      // certo
+      import { computeSigmaRef } from './optics';         // ERRADO
+
+======================================================================
+4. NOMENCLATURA
+======================================================================
+
+4.1 Idioma: código, identificadores e comentários em INGLÊS.
+    Texto visível ao usuário final do estúdio: pt-BR, só em src/studio/strings.js.
+    Mensagens de erro do núcleo (ParaJacaError.message): inglês.
+4.2 Arquivos e pastas: kebab-case (image-source.js, quality-panel.js).
+4.3 Funções e variáveis: camelCase. Constantes de módulo: UPPER_SNAKE_CASE.
+    Classes: PascalCase (única classe permitida: ParaJacaError).
+4.4 Fábricas: objetos com estado são criados por funções `createXxx(...)`
+    que retornam um objeto literal com métodos. NÃO use `class` (exceto o erro).
+4.5 Funções puras de cálculo: verbo `compute`, `resolve`, `estimate`, `clamp`,
+    `is`, `has`. Ex.: computeSigmaRef, resolveDepths, estimateLayerBytes.
+4.6 Booleanos internos: prefixo is/has/should (isPaused, hasMask).
+    Exceção: campos do formato da cena mantêm o nome do contrato (axisY, drift,
+    opaque).
+4.7 Eventos do player: strings em kebab-case exatamente:
+    'ready', 'error', 'quality-change', 'focus-change'.
+4.8 SUFIXOS DE UNIDADE (OBRIGATÓRIOS em toda variável/campo numérico com unidade):
+    ...Css     px CSS                          (pointerXCss, widthCss)
+    ...Comp    px da composição (autoria)      (contentRectComp, paddingComp)
+    ...Render  px de render (canvas)           (offsetXRender, sigmaRender)
+    ...Tex     texels                          (sigmaTex, paddingTex)
+    ...Ref     px de referência (altura 1080)  (sigmaRef, intensityRef)
+    ...Ms      milissegundos                   (frameMs)
+    ...Sec     segundos                        (dtSec)
+    ...Bytes   bytes                           (budgetBytes)
+    Sem sufixo: valores adimensionais (depth 0–100, focus 0–100, input −1..1,
+    renderScale, zoom, lod, opacity, aperture N).
+    Exceção: campos do formato da cena (seção 7) mantêm os nomes do contrato
+    (ex.: maxBlur é Ref, intensity é Ref, placement é Comp), documentados no JSDoc.
+4.9 Conversões entre unidades DEVEM aparecer por escrito numa linha própria:
+      const sigmaRender = sigmaRef * refFactor;
+    NUNCA misture unidades numa mesma expressão sem conversão explícita.
+
+======================================================================
+5. ESTILO E FORMATAÇÃO
+======================================================================
+
+5.1 2 espaços, aspas simples, ponto e vírgula, vírgula final em literais
+    multilinha, linha <= 100 colunas.
+5.2 `const` por padrão; `let` só se reatribuir; NUNCA `var`.
+5.3 Sem `export default` (exceto vite.config.js). Só exports nomeados.
+5.4 Ordem dentro de um arquivo:
+      1) comentário de cabeçalho (1–3 linhas: o que o módulo faz)
+      2) imports
+      3) typedefs JSDoc
+      4) constantes exportadas
+      5) constantes internas
+      6) funções exportadas
+      7) funções internas
+5.5 Comentários: só para explicar o PORQUÊ ou uma fórmula. Toda fórmula do
+    blueprint copiada no código DEVE ter um comentário com a fórmula original.
+    Valores (calibrar) DEVEM ter o comentário `// calibrate`.
+5.6 Sem números mágicos: todo número com significado vira constante nomeada.
+    Permitidos inline: 0, 1, 2, -1, 0.5, 100 (escala de profundidade), 255.
+5.7 Funções com mais de 3 parâmetros recebem um objeto de opções tipado.
+5.8 Sem `async` em funções que não fazem `await`.
+5.9 Sem `console.log` no código final. `console.warn`/`console.error` só no
+    estúdio, no demo e no modo diagnóstico.
+
+======================================================================
+6. TIPOS (JSDoc)
+======================================================================
+
+6.1 Toda função exportada tem JSDoc com @param e @returns tipados.
+6.2 Tipos de objeto via @typedef no módulo dono do dado:
+    - Scene, Asset, Variant, Layer, Optics, Motion, Quality → scene/model.js
+    - FrameState, LayerResource → render/renderer.js
+    - LoadedSource, AlphaMask → sources/image-source.js
+    - LayerRequirements → quality/requirements.js
+    - FrameLayout → framing.js
+    - PlayerOptions, Player, PlayerCommand → player.js
+6.3 Proibido: `any`, `@type {*}`, `// @ts-ignore`, `// @ts-nocheck`.
+    Permitido com comentário justificando: `// @ts-expect-error <motivo>`.
+6.4 Valores possivelmente nulos da API DOM/WebGL DEVEM ser checados:
+      const texture = gl.createTexture();
+      if (!texture) throw new ParaJacaError('webgl-unavailable', 'createTexture failed');
+6.5 Listas fechadas de strings como union literal:
+      /** @typedef {'dynamic' | 'fixed' | 'sharp'} FocusMode */
+
+======================================================================
+7. CONTRATO DO FORMATO DA CENA (scene.json, formatVersion 1)
+======================================================================
+
+7.1 Typedefs exatos em src/core/scene/model.js:
+
+    /** @typedef {{ width: number, height: number }} Size */
+    /** @typedef {{ x: number, y: number }} Point */
+    /** @typedef {{ x: number, y: number, width: number, height: number }} Rect */
+    /** @typedef {'png' | 'webp' | 'svg' | 'jpg'} AssetType */
+    /** @typedef {'dynamic' | 'fixed' | 'sharp'} FocusMode */
+    /** @typedef {'auto' | 'high' | 'mid' | 'low'} QualityPresetName */
+    /** @typedef {60 | 30 | 'free'} FpsTarget */
+    /**
+     * @typedef {Object} Asset
+     * @property {string} id
+     * @property {string} name
+     * @property {AssetType} type
+     * @property {number} width    original width (asset px)
+     * @property {number} height   original height (asset px)
+     * @property {string} path     relative to the manifest, e.g. 'assets/<id>.png'
+     */
+    /**
+     * @typedef {Object} Optics
+     * @property {number} focus        0–100
+     * @property {number} aperture     1.4–16 (N)
+     * @property {number} tolerance    0–100
+     * @property {number} maxBlur      Ref px, 0–MAX_BLUR_CEILING_REF
+     * @property {[number, number]} focusRange  [min, max], 0–100, min <= max
+     * @property {number} focusSpeed   0–1
+     * @property {number} breathing    0–0.02
+     */
+    /**
+     * @typedef {Object} Motion
+     * @property {number} intensity    Ref px, 0–INTENSITY_CEILING_REF
+     * @property {number} smoothing    0–1
+     * @property {boolean} axisY
+     * @property {'infinity' | 'focus'} anchor
+     * @property {boolean} drift
+     */
+    /**
+     * @typedef {Object} Quality
+     * @property {QualityPresetName} preset
+     * @property {FpsTarget} fpsTarget
+     */
+    /**
+     * @typedef {Object} Layer
+     * @property {string} id
+     * @property {string} assetId
+     * @property {Rect} placement      Comp px; default = whole composition
+     * @property {number | null} depth 0–100; null = automatic
+     * @property {FocusMode} focusMode
+     * @property {number} fixedBlur    Ref px (sigmaRef), used only when 'fixed'
+     * @property {number} order        stable tie-break; lower draws first
+     */
+    /**
+     * @typedef {Object} Variant
+     * @property {string} id
+     * @property {string} name
+     * @property {Layer[]} layers      4 to 11
+     * @property {Optics} optics
+     * @property {Motion} motion
+     * @property {Quality} quality
+     */
+    /**
+     * @typedef {Object} Scene
+     * @property {1} formatVersion
+     * @property {string} id
+     * @property {string} name
+     * @property {Size} reference         composition size in Comp px
+     * @property {Point} pointOfInterest  0–1 in the composition
+     * @property {string | null} posterAssetId
+     * @property {string} defaultVariantId
+     * @property {Asset[]} assets
+     * @property {Variant[]} variants
+     */
+
+7.2 Constantes exportadas por src/core/scene/model.js:
+    FORMAT_VERSION = 1
+    MIN_LAYERS = 4
+    MAX_LAYERS = 11
+    APERTURE_MIN = 1.4, APERTURE_MAX = 16
+    BREATHING_MAX = 0.02
+    MAX_BLUR_CEILING_REF = 48          // calibrate
+    INTENSITY_CEILING_REF = 120        // calibrate
+    DEFAULT_OPTICS = { focus: 50, aperture: 2.8, tolerance: 5, maxBlur: 24,
+                       focusRange: [0, 100], focusSpeed: 0.5, breathing: 0 }   // calibrate
+    DEFAULT_MOTION = { intensity: 40, smoothing: 0.5, axisY: true,
+                       anchor: 'infinity', drift: false }                     // calibrate
+    DEFAULT_QUALITY = { preset: 'auto', fpsTarget: 60 }
+    IMPORT_SUFFIX_REGEX = /_(\d{1,2})\.(png|webp|svg|jpe?g)$/i
+
+7.3 Funções exportadas por model.js (puras; NUNCA mutam a entrada):
+    createId() → string                         // crypto.randomUUID()
+    createDefaultVariant(name: string, layers: Layer[]) → Variant
+    createLayer(assetId: string, order: number, reference: Size) → Layer
+       (placement = { x: 0, y: 0, width: reference.width, height: reference.height },
+        depth = null, focusMode = 'dynamic', fixedBlur = 0)
+    getVariant(scene: Scene, variantId: string) → Variant | null
+    cloneScene(scene: Scene) → Scene            // structuredClone
+    Observação: createId usa globalThis.crypto.randomUUID (existe no Node >= 19
+    e nos navegadores); é a única função de model.js não determinística.
+
+7.4 Regras do formato:
+    - IDs estáveis. Variantes compartilham assets por assetId.
+    - O sufixo de importação (_1, _2...) NÃO é ID nem ordem de desenho.
+    - Ordem de desenho: depth resolvida DECRESCENTE (fundo → frente);
+      empate: order CRESCENTE.
+    - Campos desconhecidos são DESCARTADOS na leitura (validate devolve só os
+      campos do contrato).
+    - formatVersion > FORMAT_VERSION → código 'unsupported-format-version'.
+    - NUNCA adicionar campos sem efeito definido (nearZ, speed etc.).
+    - Estado de execução (texturas, posição suavizada, medições, qualidade
+      automática escolhida) NUNCA é gravado na cena.
+
+7.5 validate.js:
+    /**
+     * @typedef {{ ok: true, scene: Scene }
+     *         | { ok: false, code: 'invalid-scene' | 'unsupported-format-version',
+     *             errors: string[] }} ValidationResult
+     */
+    validateScene(input: unknown) → ValidationResult
+    - Pura. Nunca lança exceção. Nunca muta a entrada.
+    - Aplica padrões (DEFAULT_*) a campos ausentes de optics/motion/quality.
+    - Erros são strings em inglês com o caminho: 'variants[0].layers[2].depth: out of range'.
+    - Checagens: tipos de cada campo; faixas (seção 7.2 e typedefs); 4 a 11
+      camadas por variante; assetId de toda camada existe em assets;
+      defaultVariantId existe; posterAssetId existe ou é null; IDs únicos;
+      focusRange[0] <= focusRange[1]; path relativo (sem '://' e sem começar
+      com '/'), sem '..'.
+
+======================================================================
+8. ERROS
+======================================================================
+
+8.1 src/core/errors.js exporta exatamente:
+    export const ERROR_CODES = Object.freeze({
+      WEBGL_UNAVAILABLE: 'webgl-unavailable',
+      CONTEXT_LOST_UNRECOVERABLE: 'context-lost-unrecoverable',
+      INVALID_SCENE: 'invalid-scene',
+      UNSUPPORTED_FORMAT_VERSION: 'unsupported-format-version',
+      ASSET_LOAD_FAILED: 'asset-load-failed',
+      TEXTURE_TOO_LARGE: 'texture-too-large',
+      MEMORY_BUDGET_EXCEEDED: 'memory-budget-exceeded',
+    });
+    /** @typedef {typeof ERROR_CODES[keyof typeof ERROR_CODES]} ErrorCode */
+    export class ParaJacaError extends Error {
+      /** @param {ErrorCode} code @param {string} message
+          @param {{ assetId?: string, cause?: unknown }} [details] */
+      constructor(code, message, details = {}) {
+        super(message, { cause: details.cause });
+        this.name = 'ParaJacaError';
+        this.code = code;
+        this.assetId = details.assetId ?? null;
+      }
+    }
+    export function isAbortError(error) → boolean  // error.name === 'AbortError'
+
+8.2 Regras:
+    - NUNCA engolir erro (catch vazio é proibido).
+    - Cancelamento (AbortError) não é erro: é ignorado silenciosamente SÓ quando
+      isAbortError(error) for true.
+    - Todo erro que chega à API do player vira evento 'error' { code, message }
+      (+ assetId quando houver). Erros não-ParaJacaError viram code
+      'invalid-scene' se vierem da validação; nos demais casos são relançados
+      via queueMicrotask(() => { throw error; }) para aparecerem no console.
+    - Erro fatal: o player mostra o poster (se houver), para o loop e continua
+      aceitando chamadas da API sem lançar exceção.
+    - Exceção dentro de handler de evento do usuário: capturada pelo emissor e
+      relançada com queueMicrotask; o loop continua.
+    - Falha de compilação/link de shader: ParaJacaError('webgl-unavailable',
+      `Shader <nome> failed: <log do driver>`).
+
+======================================================================
+9. ASSINCRONIA, CANCELAMENTO E GERAÇÃO
+======================================================================
+
+9.1 Toda função assíncrona de carga recebe `signal: AbortSignal` como último
+    parâmetro e chama `signal.throwIfAborted()` após CADA await.
+9.2 Padrão de geração (OBRIGATÓRIO em player.js para load, setVariant,
+    reconstrução e troca de asset):
+      const generation = ++state.generation;
+      state.abortController?.abort();
+      const controller = new AbortController();
+      state.abortController = controller;
+      ... const result = await something(controller.signal);
+      if (generation !== state.generation) return;   // stale result: discard
+    Um resultado antigo NUNCA substitui uma escolha mais recente.
+9.3 Recurso criado por uma operação descartada DEVE ser liberado
+    (ImageBitmap.close(), renderer.releaseLayer).
+9.4 Carga SEQUENCIAL, camada a camada (for...of com await). Sem Promise.all
+    para camadas.
+
+======================================================================
+10. ESTADO E COMANDOS
+======================================================================
+
+10.1 Separação obrigatória dentro do player:
+     - `config`: cópia da Scene (cloneScene) + variantId atual. Persistível.
+     - `runtime`: tudo o mais (recursos, input suavizado, foco atual, medições,
+       preset efetivo, renderScale efetivo, flags). NUNCA serializado.
+10.2 Flags de atualização (bits) definidas em player.js:
+     const DIRTY_FRAME = 1;          // only uniforms / frame values
+     const DIRTY_LAYOUT = 2;         // viewport, framing, margins
+     const DIRTY_REQUIREMENTS = 4;   // recompute requirements(), maybe rebuild
+     const DIRTY_ORDER = 8;          // draw order / resolved depths
+     Comandos e eventos fazem `state.dirty |= FLAG` e chamam requestFrame().
+     O quadro processa e zera as flags. NUNCA comparar o modelo profundamente
+     a cada quadro.
+10.3 Tabela comando → flags:
+     setFocus                    → DIRTY_FRAME
+     pointer/teclado/roda        → DIRTY_FRAME
+     setQuality (só renderScale) → DIRTY_LAYOUT
+     setQuality (teto textura)   → DIRTY_LAYOUT | DIRTY_REQUIREMENTS
+     resize                      → DIRTY_LAYOUT | DIRTY_REQUIREMENTS (requirements
+                                   com debounce de RESIZE_REBUILD_DEBOUNCE_MS = 250)
+     edit optics/motion          → DIRTY_FRAME | DIRTY_LAYOUT | DIRTY_REQUIREMENTS
+     edit layer depth/order      → DIRTY_ORDER | DIRTY_LAYOUT | DIRTY_REQUIREMENTS
+     edit pointOfInterest        → DIRTY_LAYOUT
+     setVariant / troca de asset → reconstrução controlada (seção 15)
+
+======================================================================
+11. CAMINHO QUENTE (LOOP DE QUADROS)
+======================================================================
+
+11.1 "Caminho quente" = tudo chamado a partir do callback de requestAnimationFrame
+     (cálculo de quadro + renderer.draw).
+11.2 PROIBIDO no caminho quente:
+     - criar objetos, arrays, closures, strings ou template strings;
+     - spread, destructuring de objeto novo, Array.map/filter/forEach/reduce,
+       for...of sobre Map (usar arrays pré-ordenados e for com índice);
+     - gl.getError, gl.readPixels, gl.getParameter, gl.getUniformLocation,
+       gl.checkFramebufferStatus, qualquer leitura síncrona da GPU;
+     - await, Promise.
+     Exceção 1: no modo diagnóstico (options.diagnostics definido) o renderer PODE
+     chamar gl.getError após draw.
+     Exceção 2: o tratamento das flags DIRTY_ORDER, DIRTY_LAYOUT e
+     DIRTY_REQUIREMENTS PODE alocar, pois só ocorre depois de comandos, nunca em
+     todo quadro. DIRTY_FRAME NUNCA aloca.
+11.3 OBRIGATÓRIO no caminho quente:
+     - arrays tipados pré-alocados com capacidade MAX_LAYERS (Float32Array,
+       Uint8Array) e reutilizados;
+     - uniform locations obtidas UMA vez na criação do programa e guardadas;
+     - um único objeto FrameState reutilizado.
+11.4 O objeto de amostra de diagnóstico é único e reutilizado; o consumidor
+     (estúdio/demo) DEVE copiar os valores que quiser guardar.
+
+======================================================================
+12. FÓRMULAS (CONTRATO NUMÉRICO)
+======================================================================
+
+Todas em funções PURAS. Nomes de função e constantes são obrigatórios.
+
+12.1 Unidades — src/core/optics.js
+     export const REFERENCE_HEIGHT_REF = 1080;
+     computeRefFactor(compHeightComp, renderPxPerCompPx) → number
+       // refFactor = displayedSceneHeightRender / 1080
+       return (compHeightComp * renderPxPerCompPx) / REFERENCE_HEIGHT_REF;
+     Regra verificável: mudar renderScale ou escala de textura preserva a
+     intensidade aparente do parallax e do blur.
+
+12.2 Profundidade automática — optics.js
+     export const AUTO_DEPTH_BACK = 90;    // calibrate
+     export const AUTO_DEPTH_FRONT = 10;   // calibrate
+     resolveDepths(layers: Layer[]) → Float32Array  (mesma ordem de `layers`)
+       - Ordene CÓPIA dos índices por order crescente (0 = fundo).
+       - n = layers.length; posição i nessa ordenação.
+       - auto(i) = n === 1 ? AUTO_DEPTH_BACK
+                   : AUTO_DEPTH_BACK - i * (AUTO_DEPTH_BACK - AUTO_DEPTH_FRONT) / (n - 1)
+       - depth !== null → usa depth; senão auto(i).
+     computeDrawOrder(layers, resolvedDepths) → number[] (índices)
+       - depth DECRESCENTE; empate por order CRESCENTE; empate final por índice.
+     (Chamadas fora do caminho quente: só quando DIRTY_ORDER.)
+
+12.3 Blur — optics.js
+     export const APERTURE_K = 0.35;      // calibrate
+     export const APERTURE_REF_N = 2.8;
+     computeApertureK(aperture) → number
+       // kAperture = 0.35 × (2.8 / N)
+     computeSigmaRef(depth, focus, optics) → number
+       // excess = max(0, |d − dFocus| − tolerance)
+       // sigmaRef = min(maxBlur, excess × kAperture)
+     computeLayerSigmaRef(focusMode, depth, focus, fixedBlur, optics) → number
+       'dynamic' → computeSigmaRef(...)
+       'fixed'   → min(fixedBlur, optics.maxBlur)
+       'sharp'   → 0
+     sigmaRender = sigmaRef × refFactor     (escrito no chamador, regra 4.9)
+
+12.4 LOD — optics.js
+     computeLod(sigmaRender, texelsPerPixel, lastLevel) → number
+       // sigmaTex = sigmaRender × texelsPerPixel
+       // lodBlur  = 0.5 × log2(3 × sigmaTex² + 1)
+       // lodMin   = log2(max(1, texelsPerPixel))
+       // lod      = clamp(max(lodBlur, lodMin), 0, lastLevel)
+     computeLevelSigmaTex(k) → number      // sigma_k ≈ sqrt((4^k − 1) / 3)
+     texelsPerPixel de uma camada = resource.texScale / (renderPxPerCompPx × zoom)
+       (texScale = texels por px da composição; usa conteúdo visível, nunca
+       dimensões com padding).
+
+12.5 Respiração — optics.js
+     computeBreathingZoom(focus, breathing) → number
+       // zoom = 1 + breathing × (1 − focus / 100)
+     Aplicada só como zoom GLOBAL. NUNCA escalar camadas separadamente.
+
+12.6 Parallax — src/core/motion.js
+     computeAnchorDepth(anchor, focus) → number   // 'infinity' → 100; 'focus' → focus
+     computeParallaxOffsetRef(input, intensityRef, anchorDepth, depth) → number
+       // offset = −input × intensity × ((dAnchor − d) / 100)
+     Por eixo. Eixo Y só se motion.axisY; senão inputY = 0.
+     offsetRender = offsetRef × refFactor (no chamador).
+     Camadas se movem no sentido OPOSTO ao ponteiro (sinal negativo acima).
+
+12.7 Suavização — motion.js
+     export const MAX_DT_SEC = 0.1;
+     export const INPUT_K_MIN = 2, INPUT_K_MAX = 30;      // calibrate
+     export const FOCUS_K_MIN = 1, FOCUS_K_MAX = 20;      // calibrate
+     clampDt(dtSec) → number                    // clamp(dtSec, 0, MAX_DT_SEC)
+     computeInputK(smoothing) → number          // lerp(INPUT_K_MAX, INPUT_K_MIN, smoothing)
+     computeFocusK(focusSpeed) → number         // lerp(FOCUS_K_MIN, FOCUS_K_MAX, focusSpeed)
+     smoothStep(current, target, k, dtSec) → number
+       // cur += (target − cur) × (1 − exp(−k × dt))
+     (smoothing maior = mais lento; focusSpeed maior = mais rápido.)
+
+12.8 Deriva — motion.js
+     export const DRIFT_IDLE_SEC = 3;
+     export const DRIFT_AMPLITUDE_X = 0.15, DRIFT_AMPLITUDE_Y = 0.1;   // calibrate
+     export const DRIFT_PERIOD_X_SEC = 11, DRIFT_PERIOD_Y_SEC = 7;     // calibrate
+     computeDriftInputX(timeSec) → number   // AMP_X × sin(2π t / PERIOD_X)
+     computeDriftInputY(timeSec) → number   // AMP_Y × sin(2π t / PERIOD_Y)
+     A deriva só define o ALVO da entrada; a suavização continua valendo.
+     Desligada com prefers-reduced-motion.
+
+12.9 Convergência — motion.js
+     export const CONVERGENCE_OFFSET_RENDER = 0.1;   // calibrate
+     export const CONVERGENCE_SIGMA_RENDER = 0.05;   // calibrate
+     isConverged(maxRemainingOffsetRender, maxRemainingSigmaRender) → boolean
+     O player calcula, para cada camada, |offset(alvo) − offset(atual)| e
+     |sigma(alvo) − sigma(atual)| em px de render (sem alocar). Se convergiu:
+     atual = alvo, desenha uma última vez e para o loop.
+
+12.10 Movimento reduzido — motion.js
+     export const REDUCED_MOTION_INTENSITY_FACTOR = 0.2;
+     export const REDUCED_MOTION_FOCUS_K_FACTOR = 3;
+     Com prefers-reduced-motion: intensidade × 0.2, deriva desligada,
+     k do foco × 3.
+
+12.11 Enquadramento e margem — src/core/framing.js (pura)
+     export const FRAMING_MAX_ZOOM = 1.25;   // calibrate
+     /**
+      * @typedef {Object} FrameLayout
+      * @property {number} renderPxPerCompPx  final scale (cover × framing)
+      * @property {number} cameraXComp        composition point at canvas center
+      * @property {number} cameraYComp
+      * @property {number} marginXComp
+      * @property {number} marginYComp
+      * @property {number} offsetLimitXRef    max |offset| for edge layers (Infinity = no limit)
+      * @property {number} offsetLimitYRef
+      * @property {boolean} isMarginInsufficient
+      */
+     computeFrameLayout({ reference, pointOfInterest, canvasWidthRender,
+       canvasHeightRender, edgeLayers }) → FrameLayout
+     edgeLayers: Array<{ maxOffsetXRef: number, maxOffsetYRef: number }> para cada
+     camada cujo conteúdo toca a borda da composição.
+     Algoritmo (exato):
+       1. refToComp = reference.height / REFERENCE_HEIGHT (1080; duplicar a
+          constante localmente como REFERENCE_HEIGHT = 1080, pois framing.js não
+          importa optics.js).
+       2. needXComp = max(maxOffsetXRef) × refToComp; needYComp idem (0 se vazio).
+       3. limitXComp = reference.width  × (1 − 1 / FRAMING_MAX_ZOOM) / 2;
+          limitYComp = reference.height × (1 − 1 / FRAMING_MAX_ZOOM) / 2.
+       4. marginXComp = min(needXComp, limitXComp); idem Y.
+          isMarginInsufficient = needXComp > limitXComp || needYComp > limitYComp.
+          offsetLimitXRef = needXComp > limitXComp ? limitXComp / refToComp : Infinity.
+       5. visibleW = reference.width − 2 × marginXComp; visibleH idem.
+       6. renderPxPerCompPx = max(canvasWidthRender / visibleW,
+                                   canvasHeightRender / visibleH)      // cover
+       7. halfViewW = canvasWidthRender / (2 × renderPxPerCompPx); halfViewH idem.
+       8. cameraXComp = clamp(pointOfInterest.x × reference.width,
+                              marginXComp + halfViewW,
+                              reference.width − marginXComp − halfViewW); idem Y.
+     maxOffset de uma camada (Ref), feito no player:
+       anchor 'infinity': intensity × |100 − d| / 100
+       anchor 'focus':    intensity × max(|fMin − d|, |fMax − d|) / 100
+       Y = 0 se !axisY. A respiração (zoom >= 1) não exige margem.
+     "Teto de intensidade" = motion.intensity da variante (com movimento reduzido
+     NÃO reduzir aqui, para o enquadramento não mudar).
+
+12.12 Transformação de uma camada para o quadro (player, caminho quente):
+     zoom = computeBreathingZoom(focusCurrent, optics.breathing)
+     s = layout.renderPxPerCompPx × zoom
+     rectComp = retângulo do quad COM padding, em px da composição, calculado
+     UMA vez quando o recurso é preparado (não por quadro):
+       texPerCompX = req.contentSizeTex.width  / contentRectComp.width
+       texPerCompY = req.contentSizeTex.height / contentRectComp.height
+       rectComp.x = contentRectComp.x − req.paddingTex.left / texPerCompX
+       rectComp.y = contentRectComp.y − req.paddingTex.top  / texPerCompY
+       rectComp.width  = req.textureSize.width  / texPerCompX
+       rectComp.height = req.textureSize.height / texPerCompY
+     contentRectComp de uma camada = recorte do asset mapeado pelo placement:
+       compX = placement.x + assetX × placement.width / asset.width (idem Y).
+     Camada de borda: deslocamento limitado a ±layout.offsetLimitXRef/YRef
+     (antes de converter para Render).
+     xRender = (rectComp.x − cameraXComp) × s + canvasWidthRender / 2 + offsetXRender
+     yRender = (rectComp.y − cameraYComp) × s + canvasHeightRender / 2 + offsetYRender
+     wRender = rectComp.width × s;  hRender = rectComp.height × s
+     Origem (0,0) = canto SUPERIOR esquerdo do canvas; y cresce para baixo.
+
+======================================================================
+13. QUALIDADE, REQUISITOS E MEMÓRIA
+======================================================================
+
+13.1 src/core/quality/presets.js
+     export const QUALITY_PRESETS = Object.freeze({
+       high: { renderScale: 1.0,  textureMaxHeight: 2160 },   // calibrate
+       mid:  { renderScale: 0.85, textureMaxHeight: 1440 },   // calibrate
+       low:  { renderScale: 0.7,  textureMaxHeight: 1080 },   // calibrate
+     });
+     export const RENDER_SCALE_STEPS = [1.0, 0.85, 0.7, 0.5];
+     chooseAutoPreset({ viewportHeightPx, estimatedBytesByPreset, budgetBytes })
+       → 'high' | 'mid' | 'low'      (pura; conservadora):
+       high se viewportHeightPx <= 1200 e estimatedBytesByPreset.high <= 0.5 × budget;
+       senão mid se estimatedBytesByPreset.mid <= 0.7 × budget; senão low.  // calibrate
+       viewportHeightPx = cssHeight × dpr.
+
+13.2 src/core/quality/requirements.js (pura)
+     export const PADDING_SIGMA_FACTOR = 3;          // calibrate
+     export const PADDING_RECON_TEX = 2;             // calibrate
+     export const LOD_RESERVE_LEVELS = 1;            // calibrate
+     /**
+      * @typedef {Object} LayerRequirements
+      * @property {number} texScale        texels per Comp px
+      * @property {Size}   contentSizeTex  content (no padding) in texels
+      * @property {{left:number, top:number, right:number, bottom:number}} paddingTex
+      * @property {Size}   textureSize     content + padding, in texels
+      * @property {number} levels          mip levels to allocate (>= 1)
+      * @property {number} maxLod          = levels − 1
+      * @property {number} sigmaMaxRef     largest sigmaRef this layer can need
+      */
+     computeRequirements({ layer, resolvedDepth, asset, contentRectComp,
+       croppedSides, variant, reference, renderPxPerCompPxAtScale1, preset,
+       maxTextureSize }) → LayerRequirements
+     Algoritmo (exato):
+       1. sigmaMaxRef:
+          'sharp' → 0; 'fixed' → min(fixedBlur, maxBlur);
+          'dynamic' → computeSigmaRef no pior foco dentro de focusRange:
+            excessMax = max(0, max(|d − fMin|, |d − fMax|) − tolerance)
+            sigmaMaxRef = min(maxBlur, excessMax × kAperture)
+       2. texScale = min(
+            renderPxPerCompPxAtScale1 × (1 + optics.breathing),   // display need
+            asset.width / layer.placement.width,                   // never above original
+            preset.textureMaxHeight / reference.height)            // preset ceiling
+       3. sigmaMaxTex = sigmaMaxRef × (reference.height / 1080) × texScale
+          padOne = sigmaMaxRef > 0 ? ceil(PADDING_SIGMA_FACTOR × sigmaMaxTex + PADDING_RECON_TEX) : 0
+          paddingTex lado L/T/R/B = croppedSides.<lado> ? padOne : 0
+          (lado que toca a borda da composição: padding 0 e CLAMP_TO_EDGE)
+       4. contentSizeTex = { width: max(1, round(contentRectComp.width × texScale)),
+                             height: max(1, round(contentRectComp.height × texScale)) }
+          textureSize = content + paddings.
+       5. Se textureSize.width ou height > maxTextureSize: reduzir texScale
+          proporcionalmente (texScale ×= maxTextureSize / maior lado), refazer 3–4
+          (no máximo 3 iterações). Se ainda exceder: lançar NÃO; devolver e o
+          chamador emite 'texture-too-large'.
+       6. lodBlurMax = 0.5 × log2(3 × sigmaMaxTex² + 1)
+          fullChain = floor(log2(max(textureSize.width, textureSize.height))) + 1
+          levels = min(fullChain, ceil(max(lodBlurMax, 1)) + 1 + LOD_RESERVE_LEVELS)
+          ('sharp' também tem mipmaps: levels >= 2 quando fullChain >= 2.)
+     satisfiesRequirements(current, needed) → boolean
+       = current.texScale >= needed.texScale × (1 − 1e-6)
+         && current.sigmaMaxRef >= needed.sigmaMaxRef − 1e-6
+         && current.levels >= needed.levels
+     Entradas que disparam recomputação: maxBlur, aperture, tolerance, focusRange,
+     depth, focusMode, fixedBlur, anchor, axisY, viewport, proporção, preset.
+
+13.3 src/core/quality/budget.js (pura)
+     export const TEXTURE_BUDGET_BYTES = 400 * 1024 * 1024;   // calibrate (T480)
+     export const BYTES_PER_TEXEL = 4;
+     estimateTextureBytes(textureSize, levels) → number
+       // soma real de cada nível: w_k = max(1, floor(w_{k−1}/2)), idem h
+     estimatePrepTempBytes(textureSize) → number
+       // maior temporário = max(1, floor(w0/2)) × h0 × 4
+     estimateCanvasBytes(widthRender, heightRender) → number   // w × h × 4 × 2
+     estimateMaskBytes(maskWidth, maskHeight) → number         // w × h
+     estimateSceneBytes({ textures: Array<{textureSize, levels}>, canvas, maxPrepTemp,
+       masks }) → number
+     Ultrapassar TEXTURE_BUDGET_BYTES: parar a carga e emitir
+     'memory-budget-exceeded' com mensagem sugerindo preset ou variante menor.
+
+13.4 src/core/quality/governor.js (fase B)
+     export const GOVERNOR_MIN_SAMPLES = 120;        // calibrate
+     export const GOVERNOR_SLOW_RATIO = 0.25;        // calibrate
+     export const GOVERNOR_SLOW_FACTOR = 1.5;        // calibrate
+     export const GOVERNOR_COOLDOWN_MS = 5000;       // calibrate
+     createGovernor() → {
+       push(frameMs: number, targetMs: number, nowMs: number) → 'step-down' | null,
+       notifyStepApplied(nowMs: number) → void,
+       reset() → void,
+       isStopped() → boolean }
+     Regras: só decide com >= 120 quadros ATIVOS desde a última decisão; desce um
+     degrau se >= 25% passaram de 1.5 × targetMs; espera 5 s entre decisões;
+     NUNCA sobe; após 2 descidas sem melhora (fração lenta não caiu), para
+     (isStopped) — gargalo fora da GPU. Buffer interno: Float32Array(GOVERNOR_MIN_SAMPLES).
+     Ativo só quando o preset do usuário é 'auto'.
+
+======================================================================
+14. RENDERIZAÇÃO (src/core/render/**)
+======================================================================
+
+14.1 resources.js
+     export const CONTEXT_ATTRIBUTES = Object.freeze({
+       alpha: true, antialias: false, depth: false, stencil: false,
+       premultipliedAlpha: true, preserveDrawingBuffer: false,
+       powerPreference: 'high-performance',
+     });
+     createGlContext(canvas) → WebGL2RenderingContext
+       (null → ParaJacaError('webgl-unavailable', ...))
+     readLimits(gl) → { maxTextureSize, maxRenderbufferSize, maxViewportWidth,
+                        maxViewportHeight }   // lido UMA vez na criação
+     compileProgram(gl, name, vertexSource, fragmentSource, uniformNames)
+       → { program, uniforms: Record<string, WebGLUniformLocation> }
+       Compila uma vez; em falha lança com o log do driver
+       (gl.getShaderInfoLog / gl.getProgramInfoLog).
+     Toda função que cria recurso GPU documenta no JSDoc quem é o dono e qual
+     função o libera.
+
+14.2 shaders.js — só strings GLSL exportadas (sem lógica):
+     QUAD_VERTEX_SOURCE, COMPOSITE_FRAGMENT_SOURCE,
+     PYRAMID_VERTEX_SOURCE, PYRAMID_FRAGMENT_SOURCE.
+     Só na etapa A2.4 (experimental): PREMULTIPLY_FRAGMENT_SOURCE e
+     COMPOSITE_LINEAR_FRAGMENT_SOURCE.
+     Todo shader começa com "#version 300 es" na PRIMEIRA linha (sem linha em
+     branco antes) e declara `precision highp float;`.
+     Nomes GLSL: atributos a_*, uniforms u_*, varyings v_*, saída out vec4 outColor.
+
+14.3 Geometria compartilhada: UM VAO com UM buffer de 4 vértices (TRIANGLE_STRIP)
+     com a_corner = (0,0),(1,0),(0,1),(1,1); (0,0) = canto superior esquerdo.
+     Composição (vertex):
+       uniform vec4 u_rect;      // x, y, w, h in Render px, top-left origin
+       uniform vec2 u_viewport;  // canvas width/height in Render px
+       pos = u_rect.xy + a_corner * u_rect.zw;
+       gl_Position = vec4(pos.x / u_viewport.x * 2.0 - 1.0,
+                          1.0 - pos.y / u_viewport.y * 2.0, 0.0, 1.0);
+       v_uv = a_corner;          // v = 0 is the TOP row of the image
+     Composição (fragment):
+       uniform sampler2D u_texture; uniform float u_lod; uniform float u_opacity;
+       outColor = textureLod(u_texture, v_uv, u_lod) * u_opacity;
+     Na etapa C.1 (modo revelação) o fragment ganha `uniform float u_outline;`
+     conforme descrito naquela etapa; nada mais muda.
+     Orientação: NUNCA usar UNPACK_FLIP_Y_WEBGL nem UNPACK_PREMULTIPLY_ALPHA_WEBGL.
+     A linha 0 da textura é o topo da imagem; a UV acima já respeita isso.
+
+14.4 Texturas de camada:
+     - gl.texStorage2D(TEXTURE_2D, levels, RGBA8, w, h) — imutável.
+     - Dimensões NÃO potência de 2 são aceitas. NUNCA arredondar para potência de 2.
+     - Upload do nível 0: gl.texSubImage2D(TEXTURE_2D, 0, paddingTex.left,
+       paddingTex.top, RGBA, UNSIGNED_BYTE, bitmap); em seguida bitmap.close().
+     - Padding não precisa ser limpo: WebGL zera texturas novas.
+     - Parâmetros: MIN_FILTER = LINEAR_MIPMAP_LINEAR, MAG_FILTER = LINEAR,
+       WRAP_S/WRAP_T = CLAMP_TO_EDGE.
+     - NUNCA gl.generateMipmap (os níveis vêm da pirâmide).
+
+14.5 pyramid.js — buildPyramid(gl, programs, texture, textureSize, levels)
+     Para k = 1 .. levels−1:
+       srcW = max(1, floor(w0 / 2^(k−1))) ... (use o loop: w_k = max(1, floor(w_{k−1}/2)))
+       1) temp = textura RGBA8, 1 nível, tamanho (w_k, h_{k−1}),
+          MIN/MAG = LINEAR, CLAMP_TO_EDGE.
+       2) Passe H: framebuffer → temp; amostra `texture` com u_srcLod = k−1,
+          u_srcSize = (w_{k−1}, h_{k−1}), u_dstSize = (w_k, h_{k−1}), u_dir = (1, 0).
+       3) Passe V: framebuffer → `texture` nível k (framebufferTexture2D com level k);
+          amostra temp com u_srcLod = 0, u_srcSize = (w_k, h_{k−1}),
+          u_dstSize = (w_k, h_k), u_dir = (0, 1). Neste passe `texture` NÃO está
+          ligada a nenhuma unidade de textura (só temp).
+       4) gl.deleteTexture(temp).
+     Ao final: deletar o framebuffer; restaurar viewport e framebuffer null;
+     gl.disable(BLEND) durante os passes.
+     NUNCA ler e gravar a mesma textura no mesmo passe.
+     Fragment da pirâmide (exato; filtro 1-4-6-4-1/16 avaliado no centro do par
+     de texels com amostragem linear = núcleo efetivo 1-5-10-10-5-1/32, centrado,
+     sem deslocamento entre níveis):
+       uniform sampler2D u_src; uniform float u_srcLod;
+       uniform vec2 u_srcSize; uniform vec2 u_dstSize; uniform vec2 u_dir;
+       void main() {
+         vec2 center = gl_FragCoord.xy * (u_srcSize / u_dstSize);  // in src texels
+         vec4 sum = vec4(0.0);
+         sum += textureLod(u_src, (center - 2.0 * u_dir) / u_srcSize, u_srcLod) * 1.0;
+         sum += textureLod(u_src, (center - 1.0 * u_dir) / u_srcSize, u_srcLod) * 4.0;
+         sum += textureLod(u_src, center / u_srcSize, u_srcLod) * 6.0;
+         sum += textureLod(u_src, (center + 1.0 * u_dir) / u_srcSize, u_srcLod) * 4.0;
+         sum += textureLod(u_src, (center + 2.0 * u_dir) / u_srcSize, u_srcLod) * 1.0;
+         outColor = sum / 16.0;
+       }
+     Vertex da pirâmide: quad em tela cheia (a_corner → gl_Position = a_corner*2−1).
+     Observação: gl_FragCoord usa linhas de memória do framebuffer; a amostragem
+     usa as mesmas linhas de memória, então a orientação se preserva sem flip.
+
+14.6 renderer.js — API exata:
+     createRenderer(canvas, { isDiagnostics: boolean }) → {
+       prepareLayer(layerId, source, requirements, signal) → Promise<void>,
+       releaseLayer(layerId) → void,
+       hasLayer(layerId) → boolean,
+       getLayerResource(layerId) → LayerResource | null,
+       setViewport(cssWidth, cssHeight, dpr, renderScale) → { widthRender, heightRender },
+       draw(frameState) → void,
+       getLimits() → Limits,
+       dispose() → void }
+     /**
+      * @typedef {Object} LayerResource
+      * @property {WebGLTexture} texture
+      * @property {LayerRequirements} requirements
+      * @property {Rect} contentRectComp
+      * @property {boolean} opaque
+      */
+     /**
+      * @typedef {Object} FrameState
+      * @property {number} layerCount
+      * @property {string[]} layerIds        resource keys in draw order, back → front
+      *                                     (length MAX_LAYERS; key = `${variantId}:${layerId}`
+      *                                     from B.1 on, built outside the hot path)
+      * @property {Float32Array} rects       4 per layer: x, y, w, h (Render px, quad incl. padding)
+      * @property {Float32Array} lods        1 per layer
+      * @property {Float32Array} opacities   1 per layer
+      * @property {Uint8Array} outlineFlags  1 per layer (reveal mode; 0 in normal use)
+      */
+     Regras:
+     - O renderer NÃO calcula óptica nem movimento. Só desenha o que recebe.
+     - draw: clearColor(0,0,0,0) + clear; para cada camada: bind textura,
+       uniforms, drawArrays(TRIANGLE_STRIP, 0, 4). Camada com resource.opaque
+       → gl.disable(BLEND); senão gl.enable(BLEND) com
+       blendFunc(ONE, ONE_MINUS_SRC_ALPHA). Estado de blend só muda quando muda.
+     - setViewport: canvas.width/height = round(cssW × dpr × renderScale),
+       limitados por maxRenderbufferSize e maxViewport; gl.viewport.
+     - prepareLayer: cria a textura, faz upload, buildPyramid, registra o
+       LayerResource. Se já existir recurso para layerId: prepara o NOVO primeiro
+       e só depois deleta o antigo (troca). Respeita signal (abort → libera o novo).
+     - dispose: deleta tudo (texturas, programas, buffers, VAO, framebuffers).
+
+14.7 Cor e alfa (v1) — todo o tratamento de cor fica em 3 lugares, e só neles:
+     a) sources: createImageBitmap(..., { premultiplyAlpha: 'premultiply',
+        colorSpaceConversion: 'default' });
+     b) pyramid: opera sobre dados pré-multiplicados;
+     c) shader de composição: saída já pré-multiplicada.
+     Sem framebuffer intermediário, sem texturas float, sem conversão por quadro.
+     O candidato "blur em luz linear" (fase A2) só pode existir atrás da constante
+     COLOR_PIPELINE = 'srgb' | 'linear' em render/resources.js; o padrão é 'srgb'.
+
+======================================================================
+15. FONTES (src/core/sources/**)
+======================================================================
+
+15.1 Tipos (image-source.js):
+     /** @typedef {{ width: number, height: number, data: Uint8Array }} AlphaMask
+         data = alpha 0–255, row-major, linha 0 = topo, cobre o asset inteiro */
+     /**
+      * @typedef {Object} LoadedSource
+      * @property {ImageBitmap} bitmap        cropped + resized, premultiplied
+      * @property {Rect} contentRectComp      cropped area, Comp px
+      * @property {{left:boolean, top:boolean, right:boolean, bottom:boolean}} croppedSides
+      * @property {boolean} opaque
+      * @property {AlphaMask | null} alphaMask
+      */
+     /** @typedef {(asset: Asset) => string | Blob | Promise<string | Blob>} AssetResolver */
+15.2 A carga é dividida em DUAS chamadas (porque requirements precisa do
+     contentRect antes de definir o tamanho do bitmap):
+     analyzeSource(asset, layer, resolver, signal) → Promise<SourceAnalysis>
+       { blob, contentRectComp, croppedSides, opaque, alphaMask }
+     decodeSource(analysis, asset, layer, contentSizeTex, signal) → Promise<ImageBitmap>
+     loadSource(...) existe só como composição das duas para quem não precisa
+     de requisitos (testes manuais).
+15.3 Regras:
+     - Resolver string → fetch(url, { signal }); resposta !ok →
+       ParaJacaError('asset-load-failed', ..., { assetId }).
+     - Decodificação raster: createImageBitmap(blob, sx, sy, sw, sh, {
+         resizeWidth, resizeHeight, resizeQuality: 'high',
+         premultiplyAlpha: 'premultiply', colorSpaceConversion: 'default' })
+       com o recorte em px do asset. resizeWidth/Height NUNCA maiores que sw/sh.
+     - SVG: SEMPRE via <img> (HTMLImageElement) com src = URL.createObjectURL(blob),
+       await img.decode(), desenhar num OffscreenCanvas 2D no tamanho alvo,
+       createImageBitmap(canvas, { premultiplyAlpha: 'premultiply' }),
+       URL.revokeObjectURL. NUNCA injetar SVG no DOM, NUNCA innerHTML.
+     - Falha de decodificação/rasterização → 'asset-load-failed' com assetId.
+     - JPEG: opaque = true sem análise (só para fundo opaco).
+15.4 mask.js (fase A2/B):
+     export const MASK_MAX_SIDE = 512;   // calibrate
+     computeAlphaMask(imageSource, width, height) → AlphaMask (OffscreenCanvas 2D,
+       maior lado = MASK_MAX_SIDE, getImageData, só canal alfa)
+     computeContentRect(mask) → { x, y, width, height } em células da máscara,
+       expandido 1 célula para fora (conservador), ou null se tudo transparente.
+     computeIsOpaque(mask) → boolean (todo alfa === 255)
+     sampleMask(mask, u, v, radiusCells) → boolean (algum alfa > 0 no raio)
+
+======================================================================
+16. PLAYER (src/core/player.js)
+======================================================================
+
+16.1 API pública exata (não acrescentar, não remover):
+     createPlayer(container: HTMLElement, options?: PlayerOptions) → Player
+     PlayerOptions:
+       assetResolver?: AssetResolver   (padrão: new URL(asset.path, manifestUrl))
+       variantId?: string
+       quality?: 'auto' | 'high' | 'mid' | 'low'
+       fpsTarget?: 60 | 30 | 'free'
+       diagnostics?: (sample: DiagnosticsSample) => void
+     Player:
+       load(source: string | Scene) → Promise<void>
+       setVariant(id: string) → Promise<void>
+       setFocus(d: number, opts?: { animate?: boolean })   // animate padrão true
+       setQuality(preset: 'auto' | 'high' | 'mid' | 'low') → void
+       resize() → void
+       on(event, handler) → () => void       // retorna unsubscribe
+       dispose() → void
+     Eventos e payloads:
+       'ready'          {}
+       'error'          { code: ErrorCode, message: string, assetId?: string }
+       'quality-change' { preset, renderScale, reason: string }
+       'focus-change'   { d: number }        // d = novo ALVO de foco
+16.2 API INTERNA (só para o estúdio; JSDoc com @internal; não documentar como
+     pública; não exportar pelo bundle além do objeto Player):
+       edit(command: PlayerCommand) → Promise<void>
+       capturePoster(type?: string, quality?: number) → Promise<Blob>
+       setRevealMode(layerId: string | null) → void
+       setRenderScaleOverride(scale: number | null) → void
+       getScene() → Scene        // cloneScene do config
+       getLayoutInfo() → { isMarginInsufficient: boolean, renderScale: number,
+                           preset: 'high' | 'mid' | 'low' }
+     PlayerCommand (union fechada; cada um marca flags da seção 10.3):
+       { type: 'set-optics', changes: Partial<Optics> }
+       { type: 'set-motion', changes: Partial<Motion> }
+       { type: 'set-variant-quality', changes: Partial<Quality> }
+       { type: 'set-layer', layerId, changes: Partial<Pick<Layer,
+           'depth'|'focusMode'|'fixedBlur'|'order'|'placement'>> }
+       { type: 'set-point-of-interest', x: number, y: number }
+       { type: 'replace-scene', scene: Scene }   // estrutura mudou (camadas/assets)
+16.3 DOM criado pelo player dentro do container (e só isto):
+     <div class="parajaca-root" style="position:relative;width:100%;height:100%;
+          overflow:hidden">
+       <img class="parajaca-poster" alt="" style="position:absolute;inset:0;
+            width:100%;height:100%;object-fit:cover;display:none">
+       <canvas class="parajaca-canvas" tabindex="0" style="position:absolute;
+            inset:0;width:100%;height:100%;display:block;touch-action:pan-y">
+     </div>
+     dispose() remove esse DOM, todos os listeners e observers.
+16.4 Loop:
+     - requestFrame() agenda um rAF só se nenhum estiver agendado e o player não
+       estiver pausado.
+     - dt = clampDt((timestamp − lastTimestamp) / 1000).
+     - Roda enquanto houver: input não convergido, foco não convergido, deriva
+       ativa, ou flags sujas. Para na convergência.
+     - Pausa: document.visibilityState === 'hidden' (visibilitychange) e
+       IntersectionObserver (cena fora da tela). Ao voltar: lastTimestamp = null
+       (o primeiro dt após pausa é 0).
+     - fpsTarget 30: desenha só se (timestamp − lastDraw) >= 1000/30 − 4 ms.
+       'free' e 60: desenha em todo rAF.
+16.5 Entrada (desktop):
+     - pointermove no canvas: inputTarget = clamp(((x − centroX)/(larguraCss/2)),
+       −1, 1) por eixo; pointerleave: alvo 0.
+     - Alt + wheel: foco ± WHEEL_FOCUS_STEP = 2 por evento (deltaY > 0 → +);
+       preventDefault SÓ quando Alt estiver pressionado e o foco for tratado.
+     - Teclado (canvas com foco): ArrowRight/ArrowUp → foco +KEY_FOCUS_STEP (5);
+       ArrowLeft/ArrowDown → −5; preventDefault só nessas teclas.
+     - Clique → foco por silhueta (fase B): camada mais à frente (exceto 'sharp')
+       cuja máscara contém o ponto, com CLICK_TOLERANCE_CSS = 6 (calibrate),
+       usando a transformação completa da camada (offset + zoom + enquadramento).
+     - setFocus(d) limita d a focusRange. animate false → atual = alvo.
+     - prefers-reduced-motion lido via matchMedia e escutado (change).
+16.6 Erros fatais: mostrar poster (se houver posterAssetId), parar loop,
+     manter API respondendo (métodos viram no-op seguros).
+
+======================================================================
+17. ESTÚDIO (src/studio/**)
+======================================================================
+
+17.1 Textos visíveis: SEMPRE `STRINGS.<chave>` de strings.js
+     (export const STRINGS = Object.freeze({ ... })). Chaves em camelCase inglês,
+     valores em pt-BR. NUNCA texto literal pt-BR em outro arquivo do estúdio.
+17.2 Componentes: cada painel em src/studio/panels/<nome>-panel.js exporta
+     create<Nome>Panel(root: HTMLElement, store: Store) → { update(state): void,
+     dispose(): void }. DOM criado com document.createElement; textContent para
+     texto. innerHTML PROIBIDO (exceto string literal estática sem dados).
+17.3 store.js: createStore(initialState) → { getState(), dispatch(action),
+     subscribe(listener) → unsubscribe }. Ações = objetos { type: 'kebab-case', ... }.
+     O store atualiza o documento (Scene) de forma imutável e chama
+     player.edit(...) com o PlayerCommand equivalente.
+17.4 storage.js (IndexedDB):
+     DB_NAME = 'parajaca', DB_VERSION = 1, stores: 'projects' (keyPath 'id',
+     valor = Scene) e 'blobs' (chave = assetId, valor = Blob).
+     Funções: openDatabase(), saveProject(scene), loadProject(id),
+     listProjects(), deleteProject(id) (apaga também blobs órfãos),
+     saveBlob(assetId, blob), loadBlob(assetId), requestPersistence(),
+     estimateQuota(). Todas Promise; erros propagados.
+17.5 O estúdio cria o player com assetResolver = (asset) => loadBlob(asset.id).
+17.6 zip.js: único importador de 'fflate' (zipSync / unzipSync).
+     Limites: MAX_ZIP_ENTRY_BYTES = 100 MB, MAX_ZIP_TOTAL_BYTES = 500 MB,
+     MAX_ZIP_ENTRIES = 64 (calibrate). Só aceita: scene.json, poster.webp,
+     assets/<assetId>.<png|webp|svg|jpg>. Caminhos com '..' ou absolutos: rejeitar.
+17.7 Acessibilidade: todo controle é elemento nativo (<button>, <input>, <select>,
+     <label for>), navegável por teclado, com rótulo visível.
+
+======================================================================
+18. TESTES
+======================================================================
+
+18.1 Arquivo: tests/<modulo>.test.js, usando:
+       import { test } from 'node:test';
+       import assert from 'node:assert/strict';
+18.2 Só módulos puros são testados em Node: errors, scene/model, scene/validate,
+     optics, motion, framing, quality/requirements, quality/budget,
+     quality/presets, quality/governor.
+18.3 Comparação de float: helper local
+       function assertClose(actual, expected, eps = 1e-6) {
+         assert.ok(Math.abs(actual - expected) <= eps, `${actual} != ${expected}`);
+       }
+18.4 Todo teste tem nome descritivo em inglês: test('computeSigmaRef clamps to maxBlur', ...).
+18.5 Cada função pura exportada tem ao menos: 1 caso normal, 1 caso de borda
+     (limite/clamp) e, quando houver, 1 caso de propriedade (ex.: refFactor
+     preserva aparência ao mudar renderScale).
+18.6 `npm run check` DEVE passar ao fim de TODA etapa.
+
+======================================================================
+19. MEDIÇÕES E REGISTRO
+======================================================================
+
+19.1 Toda medição registra: máquina, navegador, resolução, escala do Windows,
+     assets, variante e configuração. O agente NÃO inventa resultados: medições
+     visuais e de desempenho no T480 são feitas pelo USUÁRIO.
+19.2 DiagnosticsSample (objeto único reutilizado):
+     { frameMs, drawCpuMs, renderScale, widthRender, heightRender, layerCount,
+       estimatedBytes, overdraw }   // overdraw = Σ área dos quads / área do canvas
+
+======================================================================
+20. PROIBIÇÕES CONSOLIDADAS (lista de verificação)
+======================================================================
+
+NUNCA:
+ - crossfade de opacidade em DOM; CSS filter: blur; Worker com ctx.filter;
+ - fusão automática de camadas;
+ - arredondar texturas para potência de 2; gl.generateMipmap;
+ - campo nearZ ou campos sem efeito definido;
+ - escalar camadas individualmente fora de foco (só zoom global);
+ - JSON base64 como formato de cena;
+ - classificar aparelho por categoria/marca;
+ - governador complexo antes da fase B;
+ - camada 'sharp' sem mipmaps;
+ - gl.* fora de src/core/render/**;
+ - alocação ou leitura síncrona da GPU no caminho quente;
+ - SVG no DOM; innerHTML com dados;
+ - catch vazio;
+ - gravar estado de execução na cena;
+ - criar arquivo fora da lista 2.1/2.2;
+ - alterar valor (calibrar) sem medição pedida pelo usuário;
+ - adicionar dependência não listada na seção 1.

@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ParaJaca — Demonstração da Prova Mínima (7 Camadas)</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #111; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; color: #eee; }
+    #player-container { width: 100vw; height: 100vh; position: relative; }
+    .panel {
+      position: absolute;
+      top: 16px;
+      z-index: 10;
+      width: 340px;
+      max-height: calc(100vh - 32px);
+      display: flex;
+      flex-direction: column;
+      background: rgba(15, 20, 30, 0.88);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 10px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(12px);
+    }
+    body.panels-hidden .panel { display: none; }
+    #hud { left: 16px; }
+    #layers-panel { right: 16px; }
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      padding: 12px 16px;
+      color: #4ade80;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    button.panel-header { background: none; border: 0; font-family: inherit; cursor: pointer; text-align: left; }
+    .panel-header-actions { display: flex; align-items: center; gap: 8px; }
+    .chevron-button { background: none; border: 0; color: #4ade80; font: inherit; font-size: 15px; cursor: pointer; padding: 0 2px; }
+    .chevron { display: inline-block; transition: transform 0.15s; }
+    .panel.open .chevron { transform: rotate(180deg); }
+    .panel-body { display: none; padding: 0 16px 14px; overflow-y: auto; }
+    .panel.open .panel-body { display: block; }
+    .hud-badge { background: rgba(74, 222, 128, 0.15); color: #4ade80; font-size: 11px; font-weight: 400; padding: 2px 8px; border-radius: 12px; border: 1px solid rgba(74, 222, 128, 0.3); }
+    .hud-row { margin-bottom: 12px; display: flex; flex-direction: column; gap: 5px; }
+    .hud-row-header { display: flex; justify-content: space-between; align-items: baseline; }
+    .hud-row label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; color: #94a3b8; font-weight: 600; }
+    .hud-val { font-size: 12px; color: #fff; font-family: monospace; font-weight: bold; }
+    .hud-row input[type="range"] { width: 100%; cursor: pointer; accent-color: #4ade80; height: 6px; }
+    .hud-row select {
+      background: #1e293b;
+      color: #fff;
+      border: 1px solid #334155;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 13px;
+    }
+    .hud-hint { font-size: 10px; color: #64748b; margin-top: 2px; }
+    .hud-stats {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      font-size: 12px;
+      line-height: 1.7;
+      font-family: monospace;
+    }
+    .hud-stats div { display: flex; justify-content: space-between; }
+    .hud-stats span.val { color: #38bdf8; font-weight: bold; }
+    .btn {
+      background: #1e293b;
+      color: #fff;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font: inherit;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .btn:hover:not(:disabled) { border-color: #4ade80; }
+    .btn.primary { background: #166534; border-color: #4ade80; }
+    .btn:disabled { opacity: 0.5; cursor: default; }
+    .layers-toolbar { display: flex; gap: 6px; margin: 8px 0 4px; }
+    .layers-toolbar .btn { flex: 1; }
+    #config-status { min-height: 14px; margin-top: 6px; font-size: 11px; color: #94a3b8; }
+    #config-status.error { color: #fca5a5; }
+    .layer-row { padding: 10px 0; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+    .layer-head { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+    .layer-thumb { width: 64px; height: 36px; object-fit: cover; border-radius: 4px; background: #1e293b; flex: none; }
+    .layer-title { display: flex; flex-direction: column; min-width: 0; }
+    .layer-title b { font-size: 12px; color: #fff; }
+    .layer-title span { font-size: 10px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .layer-axis { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+    .layer-axis label { width: 12px; font-size: 11px; color: #94a3b8; font-weight: 600; }
+    .layer-axis input[type="range"] { flex: 1; min-width: 0; accent-color: #4ade80; cursor: pointer; }
+    .layer-parallax input[type="range"] { accent-color: #38bdf8; }
+    .layer-parallax label { color: #38bdf8; }
+    .layer-axis input[type="number"] {
+      width: 64px;
+      background: #1e293b;
+      color: #fff;
+      border: 1px solid #334155;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font: 12px monospace;
+    }
+    #layers-panel input:disabled { opacity: 0.5; cursor: default; }
+    #layers-status { margin-top: 8px; font-size: 11px; color: #94a3b8; min-height: 14px; }
+    #layers-status.error, #replace-status.error { color: #fca5a5; }
+    #error-box {
+      margin-top: 10px;
+      padding: 8px;
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid #ef4444;
+      border-radius: 4px;
+      color: #fca5a5;
+      font-size: 11px;
+      display: none;
+    }
+    dialog#replace-dialog {
+      margin: auto;
+      width: min(560px, 92vw);
+      max-height: 90vh;
+      overflow-y: auto;
+      padding: 18px 20px;
+      color: #eee;
+      background: #0f141e;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 10px;
+    }
+    dialog#replace-dialog::backdrop { background: rgba(0, 0, 0, 0.65); }
+    #replace-dialog h2 { font-size: 15px; color: #4ade80; margin-bottom: 8px; }
+    #replace-dialog p { font-size: 11px; color: #94a3b8; line-height: 1.5; margin-bottom: 10px; }
+    .dialog-toolbar { display: flex; gap: 6px; margin-bottom: 6px; }
+    .slot-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+    .slot-row .layer-title { flex: 1; }
+    .slot-row .layer-title span.pending { color: #4ade80; }
+    #replace-status { margin-top: 8px; font-size: 11px; color: #94a3b8; min-height: 14px; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <div id="player-container"></div>
+  <aside id="hud" class="panel open">
+    <div class="panel-header">
+      <span>ParaJaca :: 7 Camadas</span>
+      <span class="panel-header-actions">
+        <span class="hud-badge" id="hud-badge-layers">7 camadas</span>
+        <button type="button" class="chevron-button" id="hud-toggle" aria-expanded="true" aria-controls="hud-body" aria-label="Expandir ou recolher o painel principal">
+          <span class="chevron" aria-hidden="true">▾</span>
+        </button>
+      </span>
+    </div>
+    <div class="panel-body" id="hud-body">
+      <div class="layers-toolbar">
+        <button type="button" class="btn" id="config-save" disabled>Salvar configuração</button>
+        <button type="button" class="btn" id="config-load" disabled>Carregar configuração</button>
+      </div>
+      <input type="file" id="config-file" accept=".json,application/json" hidden>
+      <div class="hud-hint">Salva os ajustes em JSON. As imagens devem ser carregadas separadamente.</div>
+      <div id="config-status" role="status"></div>
+      <!-- Controle de Foco -->
+      <div class="hud-row">
+        <div class="hud-row-header">
+          <label for="focus-slider">Foco Óptico (Rack Focus):</label>
+          <span class="hud-val" id="focus-val">50.0</span>
+        </div>
+        <input type="range" id="focus-slider" min="0" max="100" step="0.1" value="50">
+        <div class="hud-hint">Dica: Segure <b>Alt + Scroll do mouse</b> sobre o canvas</div>
+      </div>
+
+      <!-- Controle de Intensidade de Paralaxe (eixos independentes) -->
+      <div class="hud-row">
+        <div class="hud-row-header">
+          <label for="intensity-x-slider">Paralaxe — Eixo X:</label>
+          <span class="hud-val" id="intensity-x-val">400 px</span>
+        </div>
+        <input type="range" id="intensity-x-slider" min="0" max="400" step="1" value="400">
+      </div>
+      <div class="hud-row">
+        <div class="hud-row-header">
+          <label for="intensity-y-slider">Paralaxe — Eixo Y:</label>
+          <span class="hud-val" id="intensity-y-val">100 px</span>
+        </div>
+        <input type="range" id="intensity-y-slider" min="0" max="400" step="1" value="100">
+        <div class="hud-hint">Cada eixo é independente (0 = sem movimento naquele eixo)</div>
+      </div>
+
+      <!-- Qualidade -->
+      <div class="hud-row">
+        <label for="quality-select">Preset de Qualidade:</label>
+        <select id="quality-select">
+          <option value="high" selected>High (1.0x - Alta Definição)</option>
+          <option value="mid">Mid (0.85x - Equilibrado)</option>
+          <option value="low">Low (0.7x - Econômico)</option>
+        </select>
+        <div class="hud-hint">Atalho: <b>Ctrl+H</b> oculta/exibe todos os painéis</div>
+      </div>
+
+      <!-- Métricas em Tempo Real -->
+      <div class="hud-stats">
+        <div><span>Camadas ativas:</span> <span id="stat-layers" class="val">7 camadas</span></div>
+        <div><span>FPS médio:</span> <span id="stat-fps" class="val">--</span></div>
+        <div><span>Frame p95:</span> <span id="stat-p95" class="val">-- ms</span></div>
+        <div><span>Frame p99:</span> <span id="stat-p99" class="val">-- ms</span></div>
+        <div><span>RenderScale:</span> <span id="stat-scale" class="val">1.0</span></div>
+        <div><span>Resolução interna:</span> <span id="stat-res" class="val">--</span></div>
+        <div><span>Convergência:</span> <span id="stat-conv" class="val">--</span></div>
+      </div>
+      <div id="error-box"></div>
+    </div>
+  </aside>
+
+  <aside id="layers-panel" class="panel open">
+    <button type="button" class="panel-header" id="layers-toggle" aria-expanded="true" aria-controls="layers-body">
+      <span>Camadas — posição e paralaxe</span>
+      <span class="chevron" aria-hidden="true">▾</span>
+    </button>
+    <div class="panel-body" id="layers-body">
+      <div class="layers-toolbar">
+        <button type="button" class="btn" id="replace-open">Trocar imagens</button>
+        <button type="button" class="btn" id="reset-all">Zerar X/Y</button>
+      </div>
+      <div class="hud-hint">X/Y em px da composição (1920×1080). Camada 1 = fundo; a última é a mais próxima.</div>
+      <div class="hud-hint">Imagens em tamanho original (1:1 na composição). % = parcela dos máximos X/Y; 0% fixa, 100% máxima. Bordas são ajustadas pelo usuário.</div>
+      <div id="layers-list"></div>
+      <div id="layers-status" role="status"></div>
+    </div>
+  </aside>
+
+  <dialog id="replace-dialog" aria-labelledby="replace-title">
+    <h2 id="replace-title">Trocar imagens das camadas</h2>
+    <p>
+      Arraste as imagens para esta janela ou use “Selecionar imagens”. Arquivos terminados em <b>_1</b> … <b>_7</b>
+      vão para a camada correspondente (1 = fundo); os demais entram nas camadas livres, na ordem do nome.
+      Camadas sem imagem nova mantêm a atual. Aceita PNG, JPG e WebP.
+      Cada imagem mantém suas dimensões originais, maior ou menor que 1920×1080; ajuste o alinhamento em X/Y.
+    </p>
+    <div class="dialog-toolbar">
+      <button type="button" class="btn" id="replace-pick-many">Selecionar imagens…</button>
+      <button type="button" class="btn" id="replace-clear">Limpar seleção</button>
+    </div>
+    <div id="replace-slots"></div>
+    <div id="replace-status" role="status"></div>
+    <div class="dialog-actions">
+      <button type="button" class="btn" id="replace-cancel">Cancelar</button>
+      <button type="button" class="btn primary" id="replace-apply" disabled>Trocar imagens</button>
+    </div>
+    <input type="file" id="replace-files" accept="image/png,image/jpeg,image/webp" multiple hidden>
+    <input type="file" id="replace-slot-file" accept="image/png,image/jpeg,image/webp" hidden>
+  </dialog>
+
+  <script type="module" src="/demo/main.js"></script>
+</body>
+</html>

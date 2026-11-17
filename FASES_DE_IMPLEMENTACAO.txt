@@ -1,0 +1,706 @@
+PARAJACA — FASES DE IMPLEMENTAÇÃO
+Versão 1.0 — 2026-11-17
+Derivado de: ParaJaca — Blueprint do projeto v1.0
+Contrato de código: REGRAS_DE_CODIGO.txt (citado como "R§<seção>")
+
+======================================================================
+COMO EXECUTAR ESTE ARQUIVO
+======================================================================
+
+1. Execute UMA etapa por vez, na ordem exata. Nunca pule, junte ou adiante.
+2. Antes de começar uma etapa, releia: a etapa inteira + as seções R§ citadas.
+3. Cada etapa tem:
+     Objetivo  — o que existe ao final.
+     Arquivos  — os ÚNICOS arquivos que podem ser criados/alterados.
+     Fazer     — passos numerados, na ordem.
+     Não fazer — proibições específicas da etapa.
+     Aceite    — condições objetivas. Todas precisam passar.
+4. Ao terminar uma etapa:
+     a) rode `npm run check` (exceto na etapa 0.1, antes de existir código);
+     b) troque "[ ]" por "[x]" no título da etapa NESTE arquivo
+        (é a única edição permitida neste arquivo);
+     c) informe ao usuário: o que foi feito, arquivos alterados, resultado do
+        check e o que ficou para validação manual.
+5. Etapas marcadas "PORTÃO" exigem validação do USUÁRIO. Pare, descreva o que
+   ele deve testar e AGUARDE a aprovação explícita antes da próxima etapa.
+6. Etapas marcadas "USUÁRIO" dependem de algo que só o usuário fornece (imagens,
+   medições). Se faltar, pare e peça. Nunca invente imagens, medições ou
+   resultados.
+7. Se um Aceite não passar depois de 3 tentativas de correção, pare e relate
+   o erro exato ao usuário.
+
+Legenda de status: [ ] pendente   [x] concluída
+
+======================================================================
+FASE 0 — FUNDAÇÃO DO REPOSITÓRIO
+======================================================================
+
+[x] 0.1 — Configuração do projeto
+  Objetivo: projeto Node com typecheck, testes e servidor de desenvolvimento.
+  Arquivos: package.json, tsconfig.json, vite.config.js, .gitignore
+  Fazer:
+    1. Criar package.json exatamente como R§1.9.
+    2. Criar tsconfig.json exatamente como R§1.10.
+    3. Criar vite.config.js exatamente como R§1.11.
+    4. Criar .gitignore como R§2.3.
+    5. Rodar `npm install -D typescript vite @types/node`.
+  Não fazer: instalar qualquer outro pacote; criar pastas vazias.
+  Aceite: `npm install` termina sem erro; node_modules contém typescript e vite.
+
+[x] 0.2 — Erros do núcleo
+  Objetivo: classe ParaJacaError e códigos de erro.
+  Arquivos: src/core/errors.js, tests/errors.test.js
+  Fazer:
+    1. Implementar src/core/errors.js exatamente como R§8.1.
+    2. isAbortError(error: unknown): retorna true se error é objeto com
+       name === 'AbortError' (DOMException incluída).
+    3. Testes: ParaJacaError guarda code, message, assetId (null por padrão),
+       name 'ParaJacaError', instanceof Error; isAbortError com
+       new DOMException('x', 'AbortError') → true; com new Error('x') → false;
+       com null → false.
+  Aceite: `npm run check` passa (0 erros de tipo, todos os testes ok).
+
+======================================================================
+FASE A — PROVA MÍNIMA
+Entrega: renderer, pirâmide com LOD, alfa pré-multiplicado, parallax, foco por
+slider, 4 camadas reais, renderScale manual e medições simples.
+======================================================================
+
+[x] A.1 — Modelo e validação da cena
+  Objetivo: contrato da cena formatVersion 1 (R§7) com validação completa.
+  Arquivos: src/core/scene/model.js, src/core/scene/validate.js,
+            tests/model.test.js, tests/validate.test.js
+  Fazer:
+    1. model.js: typedefs de R§7.1, constantes de R§7.2, funções de R§7.3.
+       Exportar também os typedefs (são importáveis via import() em JSDoc).
+    2. validate.js: validateScene(input) como R§7.5.
+       - Construir a cena de saída campo a campo (não copiar o objeto de
+         entrada), para descartar campos desconhecidos.
+       - Para optics/motion/quality ausentes ou parciais: começar de
+         structuredClone(DEFAULT_*) e sobrescrever só campos presentes e válidos.
+       - Para layer.placement ausente: { x:0, y:0, width: reference.width,
+         height: reference.height }. depth ausente → null. focusMode ausente →
+         'dynamic'. fixedBlur ausente → 0.
+       - Ordem das checagens: (a) input é objeto; (b) formatVersion é número
+         inteiro; se > FORMAT_VERSION → retorna já com code
+         'unsupported-format-version'; (c) demais campos acumulando erros.
+       - ok:false se houver qualquer erro; code 'invalid-scene'.
+    3. Testes (mínimo): cena válida mínima passa e recebe defaults; campo
+       desconhecido é descartado; formatVersion 2 → unsupported-format-version;
+       3 camadas → invalid-scene; 12 camadas → invalid-scene; assetId
+       inexistente → invalid-scene; aperture 1.0 → invalid-scene; path
+       '../x.png' → invalid-scene; entrada não é mutada (comparar com
+       structuredClone feito antes); createLayer gera placement da composição.
+  Não fazer: migrações de versão; lançar exceção em validateScene.
+  Aceite: `npm run check` passa.
+
+[x] A.2 — Óptica
+  Objetivo: funções puras de R§12.1–12.5.
+  Arquivos: src/core/optics.js, tests/optics.test.js
+  Fazer:
+    1. Implementar, com as constantes e nomes exatos: REFERENCE_HEIGHT_REF,
+       computeRefFactor, AUTO_DEPTH_BACK, AUTO_DEPTH_FRONT, resolveDepths,
+       computeDrawOrder, APERTURE_K, APERTURE_REF_N, computeApertureK,
+       computeSigmaRef, computeLayerSigmaRef, computeLod, computeLevelSigmaTex,
+       computeBreathingZoom.
+    2. computeSigmaRef(depth, focus, optics) usa optics.tolerance,
+       optics.aperture, optics.maxBlur.
+    3. Testes (mínimo):
+       - computeRefFactor(1080, 1) = 1; (1440, 1.5) = 2.
+       - Propriedade de unidade: para renderScale 1 e 0.5, sigmaRender/
+         alturaRender é igual (refFactor proporcional a renderPxPerCompPx).
+       - computeSigmaRef: dentro da tolerância → 0; f/2.8 com excesso 10 → 3.5;
+         clamp em maxBlur; f/5.6 dá metade de f/2.8.
+       - computeLayerSigmaRef: 'sharp' → 0; 'fixed' → fixedBlur limitado.
+       - computeLod: sigma 0 e texelsPerPixel 1 → 0; texelsPerPixel 4 → >= 2;
+         clamp em lastLevel; consistência: computeLod(computeLevelSigmaTex(k), 1, 99) ≈ k.
+       - resolveDepths: 4 camadas null → [90, 63.33.., 36.66.., 10] por order;
+         depth manual preservada; computeDrawOrder ordena depth decrescente e
+         desempata por order.
+       - computeBreathingZoom(100, 0.02) = 1; (0, 0.02) = 1.02.
+  Aceite: `npm run check` passa.
+
+[x] A.3 — Movimento
+  Objetivo: funções puras de R§12.6–12.10.
+  Arquivos: src/core/motion.js, tests/motion.test.js
+  Fazer:
+    1. Implementar com nomes exatos: computeAnchorDepth,
+       computeParallaxOffsetRef, MAX_DT_SEC, INPUT_K_MIN/MAX, FOCUS_K_MIN/MAX,
+       clampDt, computeInputK, computeFocusK, smoothStep, DRIFT_* ,
+       computeDriftInputX/Y, CONVERGENCE_OFFSET_RENDER, CONVERGENCE_SIGMA_RENDER,
+       isConverged, REDUCED_MOTION_INTENSITY_FACTOR, REDUCED_MOTION_FOCUS_K_FACTOR.
+    2. Testes (mínimo):
+       - offset: input 1, intensidade 40, âncora 100, depth 0 → −40;
+         depth 100 → 0 (sem movimento no infinito); input −1 inverte o sinal.
+       - âncora 'focus': camada na profundidade do foco → 0.
+       - smoothStep independente da taxa: 1 passo de dt=0.032 ≈ 2 passos de
+         dt=0.016 (erro < 1e-9 pela forma exponencial).
+       - clampDt(5) = 0.1; clampDt(−1) = 0.
+       - isConverged(0.05, 0.01) true; (0.2, 0) false.
+  Aceite: `npm run check` passa.
+
+[x] A.4 — Enquadramento
+  Objetivo: computeFrameLayout de R§12.11.
+  Arquivos: src/core/framing.js, tests/framing.test.js
+  Fazer:
+    1. Implementar FRAMING_MAX_ZOOM, typedef FrameLayout e computeFrameLayout
+       seguindo os 8 passos de R§12.11 literalmente.
+    2. Testes (mínimo):
+       - Sem edgeLayers, composição 1920×1080, canvas 1920×1080 → escala 1,
+         câmera no centro, margens 0, offsetLimit Infinity.
+       - Canvas retrato (1080×1920) → cover pela altura; câmera limitada às bordas.
+       - pointOfInterest (0,0) → câmera presa no limite mínimo.
+       - Margem pedida acima do limite → isMarginInsufficient true e
+         offsetLimitXRef finito.
+       - Margem: visibleW = width − 2×margin reflete na escala.
+  Aceite: `npm run check` passa.
+
+[x] A.5 — Presets e requisitos por camada
+  Objetivo: R§13.1 (só QUALITY_PRESETS e RENDER_SCALE_STEPS) e R§13.2.
+  Arquivos: src/core/quality/presets.js, src/core/quality/requirements.js,
+            tests/presets.test.js, tests/requirements.test.js
+  Fazer:
+    1. presets.js: QUALITY_PRESETS e RENDER_SCALE_STEPS. chooseAutoPreset fica
+       para a etapa B.4 (não criar agora).
+    2. requirements.js: constantes, typedef LayerRequirements,
+       computeRequirements e satisfiesRequirements exatamente como R§13.2.
+       requirements.js não importa optics.js (R§3.1): duplicar localmente
+       REFERENCE_HEIGHT = 1080 e a fórmula kAperture = 0.35 × (2.8 / N) com
+       comentário "// keep in sync with optics.js".
+    3. Testes (mínimo):
+       - 'sharp': sigmaMaxRef 0, padding 0, levels >= 2 se a textura > 1px.
+       - texScale nunca > asset.width / placement.width.
+       - texScale limitado pelo teto do preset (low: 1080 / reference.height).
+       - Lado não recortado → padding 0; recortado → padding > 0 se sigma > 0.
+       - Excesso de maxTextureSize reduz texScale até caber.
+       - satisfiesRequirements: maior escala e maior sigma satisfaz; menor não.
+  Aceite: `npm run check` passa.
+
+[x] A.6 — Fonte de imagem (versão mínima)
+  Objetivo: carregar PNG/WebP/JPEG como ImageBitmap pré-multiplicado (R§15).
+  Arquivos: src/core/sources/image-source.js
+  Fazer:
+    1. Typedefs de R§15.1 (AlphaMask, LoadedSource, AssetResolver) e
+       SourceAnalysis = { blob, contentRectComp, croppedSides, opaque, alphaMask }.
+    2. resolveBlob(asset, resolver, signal) (interna): chama resolver; string →
+       fetch(url, { signal }) → resposta !ok → ParaJacaError('asset-load-failed',
+       `HTTP ${status} for ${asset.path}`, { assetId: asset.id }); Blob → usa direto.
+    3. analyzeSource(asset, layer, resolver, signal) — VERSÃO MÍNIMA DA FASE A:
+       contentRectComp = layer.placement; croppedSides todos false;
+       opaque = asset.type === 'jpg'; alphaMask = null.
+       (O recorte real entra na etapa A2.1.)
+    4. decodeSource(analysis, asset, layer, contentSizeTex, signal):
+       raster → createImageBitmap(blob, 0, 0, asset.width, asset.height, {
+       resizeWidth: contentSizeTex.width, resizeHeight: contentSizeTex.height,
+       resizeQuality: 'high', premultiplyAlpha: 'premultiply',
+       colorSpaceConversion: 'default' }). Envolver falhas em
+       'asset-load-failed' (cause = erro original; AbortError é relançado como está).
+       Tipo 'svg' nesta fase → ParaJacaError('asset-load-failed',
+       'SVG not supported yet').
+    5. signal.throwIfAborted() após cada await (R§9.1).
+  Não fazer: máscara, recorte, SVG, cache de blobs.
+  Aceite: `npm run check` passa.
+
+[x] A.7 — Contexto WebGL2 e shaders
+  Objetivo: R§14.1–14.3.
+  Arquivos: src/core/render/resources.js, src/core/render/shaders.js
+  Fazer:
+    1. resources.js: CONTEXT_ATTRIBUTES, COLOR_PIPELINE = 'srgb',
+       createGlContext, readLimits (MAX_TEXTURE_SIZE, MAX_RENDERBUFFER_SIZE,
+       MAX_VIEWPORT_DIMS), compileProgram (anexa shaders, linka, detacha e
+       deleta shaders após link; busca as uniform locations listadas; location
+       null para nome listado → erro claro), createQuadGeometry(gl) →
+       { vao, buffer } com os 4 cantos de R§14.3 em Float32Array, atributo
+       location 0 (usar `layout(location = 0) in vec2 a_corner;` nos shaders).
+    2. shaders.js: QUAD_VERTEX_SOURCE e COMPOSITE_FRAGMENT_SOURCE exatamente
+       como R§14.3; PYRAMID_VERTEX_SOURCE e PYRAMID_FRAGMENT_SOURCE como R§14.5.
+       Usar template string com o "#version 300 es" colado à crase de abertura:
+       export const QUAD_VERTEX_SOURCE = `#version 300 es
+       precision highp float;
+       ...`;
+  Aceite: `npm run check` passa. (Teste em navegador acontece na A.10.)
+
+[x] A.8 — Pirâmide de blur
+  Objetivo: buildPyramid de R§14.5.
+  Arquivos: src/core/render/pyramid.js
+  Fazer:
+    1. Exportar computeLevelSizes(size, levels) → Size[] (w_k = max(1, floor(w_{k−1}/2))).
+    2. Exportar buildPyramid(gl, pyramidProgram, quad, texture, textureSize, levels)
+       seguindo R§14.5 passo a passo. pyramidProgram = { program, uniforms }.
+    3. Usar UMA textura temporária por nível, deletada ao fim do nível.
+    4. Um framebuffer criado no início e deletado no fim.
+    5. Ao final restaurar: bindFramebuffer(null), viewport do canvas (receber
+       como parâmetro canvasWidth/canvasHeight), useProgram(null).
+    6. Checar gl.checkFramebufferStatus UMA vez por anexo SOMENTE se
+       isDiagnostics (parâmetro); fora disso, não chamar.
+  Não fazer: gl.generateMipmap; potência de 2; ler e gravar a mesma textura.
+  Aceite: `npm run check` passa.
+
+[x] A.9 — Renderer
+  Objetivo: createRenderer de R§14.6.
+  Arquivos: src/core/render/renderer.js
+  Fazer:
+    1. Typedefs LayerResource e FrameState (R§14.6). Exportar
+       createFrameState() → FrameState com arrays de capacidade MAX_LAYERS
+       (importar MAX_LAYERS? NÃO: render não importa scene; definir
+       FRAME_CAPACITY = 11 com comentário "// = MAX_LAYERS in scene/model.js").
+    2. createRenderer(canvas, { isDiagnostics }):
+       - createGlContext, readLimits, compileProgram para composição
+         (uniforms: u_rect, u_viewport, u_texture, u_lod, u_opacity) e pirâmide
+         (u_src, u_srcLod, u_srcSize, u_dstSize, u_dir), createQuadGeometry.
+       - resources = new Map<string, LayerResource>.
+    3. prepareLayer(layerId, source, requirements, signal):
+       source = { bitmap, contentRectComp, opaque }.
+       Ordem: signal.throwIfAborted → createTexture → texStorage2D(levels,
+       RGBA8) → parâmetros (R§14.4) → texSubImage2D no offset do padding →
+       bitmap.close() → buildPyramid → signal.throwIfAborted (se abortado:
+       deletar a textura nova e relançar) → se já havia recurso: deletar a
+       textura antiga → registrar novo recurso.
+       (prepareLayer é síncrono por dentro; o Promise existe pelo contrato.)
+    4. draw(frameState): R§14.6. Uniform u_viewport uma vez por quadro.
+       Sem alocação (R§11).
+    5. setViewport: R§14.6; retorna { widthRender, heightRender }.
+    6. releaseLayer, hasLayer, getLayerResource, getLimits, dispose.
+  Aceite: `npm run check` passa.
+
+[x] A.10 — Player mínimo: carga e quadro estático
+  Objetivo: createPlayer que carrega uma cena e desenha um quadro.
+  Arquivos: src/core/player.js
+  Fazer:
+    1. Typedefs PlayerOptions, Player, DiagnosticsSample (R§16.1, R§19.2).
+    2. createPlayer(container, options): criar o DOM de R§16.3; criar renderer
+       (isDiagnostics = !!options.diagnostics). Se createGlContext falhar: emitir
+       'error' webgl-unavailable (assíncrono via queueMicrotask, para o
+       chamador conseguir registrar o handler) e manter API no-op.
+    3. Emissor de eventos: Map<string, Set<handler>>; on() retorna unsubscribe;
+       emit() chama cada handler em try/catch e relança com queueMicrotask (R§8.2).
+    4. Estado: `config` { scene, variantId } e `runtime` (R§10.1), incluindo
+       generation e abortController (R§9.2).
+    5. load(source):
+       a) generation + abort do anterior (R§9.2).
+       b) string → fetch, json, manifestUrl = new URL(source, document.baseURI);
+          objeto → manifestUrl = new URL(document.baseURI).
+       c) validateScene; erro → ParaJacaError(code, errors.join('; ')).
+       d) variante = options.variantId ?? scene.defaultVariantId.
+       e) resolveDepths + computeDrawOrder.
+       f) preset efetivo: options.quality; nesta fase 'auto' resolve para 'high'
+          (substituído na B.4).
+       g) setViewport(css, dpr, preset.renderScale); layout em renderScale 1:
+          computeFrameLayout com canvas = css × dpr. edgeLayers: todas as
+          camadas com maxOffset de R§12.11 (nesta fase toda camada toca a borda).
+       h) Para cada camada na ordem de desenho, sequencialmente:
+          analyzeSource → computeRequirements (renderPxPerCompPxAtScale1 do
+          passo g; maxTextureSize de getLimits) → se textureSize > limite:
+          'texture-too-large' → decodeSource → renderer.prepareLayer →
+          calcular e guardar rectComp da camada (R§12.12). Checar generation
+          após cada await.
+       i) Calcular layout final com o canvas real (render px) e emitir 'ready'.
+       j) Marcar DIRTY_FRAME e requestFrame().
+       Qualquer erro: se isAbortError → ignorar; senão emitir 'error' (R§8.2).
+    6. frame(): só desenha (sem input ainda): foco = optics.focus, input 0.
+       Para cada camada (índice da ordem de desenho): sigmaRef →
+       sigmaRender = sigmaRef × refFactor → texelsPerPixel = texScale /
+       (renderPxPerCompPx × zoom) → lod = computeLod(..., levels − 1); rect por
+       R§12.12; opacity 1; outlineFlags 0. renderer.draw(frameState).
+    7. resize(): ResizeObserver no container chama resize(); resize marca
+       DIRTY_LAYOUT (requirements ainda não são refeitos nesta fase).
+    8. dispose(): abort, renderer.dispose, observers, listeners, DOM.
+  Não fazer: input, animação, variantes, poster, governador.
+  Aceite: `npm run check` passa.
+
+[x] A.11 — Player: loop, entrada, foco animado e medições
+  Objetivo: parallax pelo ponteiro, foco suavizado, loop sob demanda.
+  Arquivos: src/core/player.js
+  Fazer:
+    1. Loop de R§16.4 (requestFrame, dt, pausa por visibilitychange e
+       IntersectionObserver, fpsTarget).
+    2. Entrada de ponteiro de R§16.5 (pointermove/pointerleave) → inputTarget.
+    3. Por quadro (sem alocar, R§11):
+       inputX/Y = smoothStep(atual, alvo, computeInputK(smoothing), dt);
+       focus = smoothStep(focusAtual, focusAlvo, computeFocusK(focusSpeed), dt);
+       zoom = computeBreathingZoom(focus, breathing);
+       por camada: offsetRef via computeParallaxOffsetRef (X; Y só se axisY);
+       limitar camada de borda a ±offsetLimit*Ref; offsetRender = offsetRef ×
+       refFactor; lod; rect.
+    4. Convergência (R§12.9): calcular restante máximo de offset e sigma em
+       Render px; se isConverged → atual = alvo, desenhar e parar.
+    5. setFocus(d, { animate = true }): clamp em focusRange; animate false →
+       focusAtual = d; emitir 'focus-change' { d }; DIRTY_FRAME.
+    6. setQuality(preset) só com renderScale (high/mid/low): setViewport e
+       DIRTY_LAYOUT; emitir 'quality-change' { preset, renderScale,
+       reason: 'manual' }.
+    7. Diagnóstico: se options.diagnostics, preencher o objeto único
+       DiagnosticsSample (frameMs = intervalo real entre rAFs, drawCpuMs =
+       performance.now() antes/depois do draw) e chamar o callback.
+       overdraw = Σ(w×h dos rects) / (widthRender×heightRender).
+  Não fazer: deriva, teclado, roda, clique, movimento reduzido (fase B).
+  Aceite: `npm run check` passa.
+
+[x] A.12 — USUÁRIO — Cena de referência com 4 camadas
+  Objetivo: demo/scene.json com o fundo + 3 camadas reais.
+  Arquivos: demo/scene.json, demo/assets/*
+  Fazer:
+    1. Pedir ao usuário as 7 PNGs (R: blueprint §21) se não estiverem no projeto.
+       NÃO gerar imagens substitutas.
+    2. Copiar 4 PNGs (o _1 = fundo + 3 escolhidas pelo usuário) para
+       demo/assets/<assetId>.png, com assetId = crypto.randomUUID() gerado uma vez.
+    3. Ler largura/altura reais de cada PNG (cabeçalho IHDR: bytes 16–23,
+       big-endian) com um comando Node de uma linha; não adivinhar.
+    4. Escrever demo/scene.json formatVersion 1, reference = tamanho das PNGs,
+       pointOfInterest 0.5/0.5, posterAssetId null, 1 variante 'default' com
+       as 4 camadas (order 0 = fundo), depth null, focusMode 'dynamic',
+       optics/motion/quality = DEFAULT_*.
+    5. Validar o arquivo com validateScene num comando Node de uma linha.
+  Aceite: validateScene(scene.json).ok === true.
+
+[x] A.13 — Página de demonstração
+  Objetivo: página para ver e medir o efeito.
+  Arquivos: demo/index.html, demo/main.js
+  Fazer:
+    1. index.html: container 100vw × 100vh (fundo #111), painel fixo pequeno
+       com: slider de foco (0–100, passo 0.1), select de qualidade
+       (high/mid/low), leitura de FPS, p95 e p99 do frameMs, renderScale e
+       resolução interna. Texto pt-BR permitido aqui (demo não é o estúdio).
+    2. main.js: createPlayer(container, { quality: 'high', diagnostics });
+       player.load('scene.json'); slider → setFocus; select → setQuality;
+       on('error') mostra code e message no painel.
+    3. Diagnóstico: copiar frameMs para um Float32Array(600) circular;
+       a cada 500 ms calcular FPS médio, p95 e p99 (copiar, ordenar) e exibir.
+  Aceite: `npm run check` passa; `npm run dev` serve
+  http://localhost:5173/demo/ sem erro no console.
+
+[ ] A.14 — PORTÃO A — Aprovação visual e 7 camadas
+  Fazer:
+    1. Pedir ao usuário que abra /demo/ no T480 (Chrome/Edge) e avalie:
+       parallax, rack focus, os dois juntos, estabilidade, ausência de halos,
+       bordas e cintilação; e registre FPS/p95/p99 em high/mid/low com
+       máquina, navegador, resolução e escala do Windows (R§19.1).
+    2. Corrigir apenas defeitos apontados pelo usuário, um por vez.
+    3. Após aprovação: acrescentar as outras 3 camadas ao demo/scene.json
+       (mesmo procedimento da A.12) e pedir nova medição com 7 camadas.
+  Aceite: o usuário aprovou explicitamente o efeito e registrou as medições
+  com 7 camadas. Sem aprovação, NÃO iniciar a fase A2.
+
+======================================================================
+FASE A2 — QUALIDADE VISUAL
+Entrega: calibração de LOD, padding, interpolação e enquadramento; comparação
+sRGB × candidato linear. Observação: o recorte (blueprint fase B) é antecipado
+para cá porque o padding só existe em lados recortados.
+======================================================================
+
+[ ] A2.1 — Máscara alfa, recorte e opacidade
+  Arquivos: src/core/sources/mask.js, src/core/sources/image-source.js,
+            src/core/player.js
+  Fazer:
+    1. mask.js: R§15.4 (MASK_MAX_SIDE, computeAlphaMask, computeContentRect,
+       computeIsOpaque, sampleMask). computeAlphaMask desenha a fonte num
+       OffscreenCanvas 2D (willReadFrequently: true) com o maior lado =
+       min(MASK_MAX_SIDE, maior lado do asset), lê getImageData e copia só o alfa.
+    2. analyzeSource completo: decodificar uma vez com createImageBitmap(blob)
+       para a máscara (fechar depois); contentRect em células → px do asset
+       (arredondar para fora) → px da composição pelo placement (R§12.12);
+       croppedSides.left = recorte.x > 0, top = recorte.y > 0,
+       right = recorte.x + w < asset.width, bottom idem;
+       opaque = type 'jpg' || computeIsOpaque(mask). Máscara toda transparente
+       → 'asset-load-failed' com mensagem 'layer is fully transparent'.
+    3. decodeSource usa o recorte (sx, sy, sw, sh em px do asset).
+    4. player: edgeLayers e limites de offset passam a usar croppedSides:
+       maxOffsetXRef só se (!croppedSides.left || !croppedSides.right);
+       maxOffsetYRef só se (!top || !bottom). Limite de offset só em camadas de borda.
+  Aceite: `npm run check` passa; demo visualmente igual à A.14 (usuário confirma).
+
+[ ] A2.2 — Ferramenta de calibração
+  Arquivos: demo/calibration.html, demo/calibration.js, src/core/render/renderer.js
+  Fazer:
+    1. calibration.html: canvas + controles: imagem (de teste ou uma camada da
+       demo), lod (0 a último nível, passo 0.01), deslocamento X sub-pixel
+       (−2 a 2 px, passo 0.05), escala de render (0.5–1), escala de textura (0.25–1).
+    2. Imagens de teste geradas em OffscreenCanvas no navegador (não arquivos):
+       (a) grade de linhas de 1 px, (b) ponto branco de 1 px no centro sobre
+       transparente, (c) borda de objeto opaco sobre transparente.
+    3. calibration.js usa SÓ a API do renderer/sources/requirements/optics
+       (R§3.1). Desenha a camada com FrameState montado à mão.
+    4. Mostrar também, para o lod atual, o sigma teórico computeLevelSigmaTex.
+  Aceite: `npm run check` passa. O usuário verifica: (a) o ponto não se
+  desloca ao variar o lod; (b) transição contínua entre níveis; (c) sem halo
+  escuro na borda (c); (d) aparência igual ao variar escala de render/textura.
+  Defeitos encontrados viram correções na etapa A2.3, uma por vez.
+
+[ ] A2.3 — USUÁRIO — Calibração de constantes
+  Fazer:
+    1. Com o usuário, ajustar SOMENTE constantes marcadas "// calibrate"
+       (APERTURE_K, PADDING_*, LOD_RESERVE_LEVELS, FRAMING_MAX_ZOOM, defaults
+       de óptica/movimento, presets), uma por vez, com valor informado ou
+       aprovado pelo usuário.
+    2. Atualizar testes afetados pelos novos valores.
+  Não fazer: mudar fórmulas. Se a fórmula parecer errada, relatar e parar.
+  Aceite: `npm run check` passa; usuário aprova cada valor.
+
+[ ] A2.4 — Candidato de cor linear (experimental)
+  Arquivos: src/core/render/resources.js, shaders.js, renderer.js,
+            src/core/sources/image-source.js
+  Fazer (tudo condicionado a COLOR_PIPELINE === 'linear'; 'srgb' continua
+  idêntico):
+    1. sources: premultiplyAlpha 'none' no bitmap final.
+    2. renderer: textura principal com SRGB8_ALPHA8. Upload do bitmap numa
+       textura temporária SRGB8_ALPHA8 (1 nível); passe de preparo
+       PREMULTIPLY_FRAGMENT_SOURCE escreve no nível 0 da principal, dentro do
+       retângulo de conteúdo (viewport = área sem padding):
+         vec4 c = texelFetch(u_src, ivec2(gl_FragCoord.xy) - u_offset, 0);
+         outColor = vec4(c.rgb * c.a, c.a);   // c is linear (sRGB decode)
+       Deletar a temporária.
+    3. Pirâmide: inalterada (amostrar SRGB8_ALPHA8 decodifica, gravar codifica).
+    4. Composição (shader alternativo COMPOSITE_LINEAR_FRAGMENT_SOURCE):
+         vec4 c = textureLod(u_texture, v_uv, u_lod);
+         if (c.a <= 0.0) { outColor = vec4(0.0); return; }
+         vec3 rgb = c.rgb / c.a;
+         rgb = mix(rgb * 12.92, 1.055 * pow(rgb, vec3(1.0 / 2.4)) - 0.055,
+                   step(vec3(0.0031308), rgb));
+         outColor = vec4(rgb * c.a, c.a) * u_opacity;
+    5. O usuário compara 'srgb' × 'linear' com as imagens reais e mede o custo.
+  Aceite: `npm run check` passa nos dois valores da constante. Decisão do
+  usuário: adotar 'linear' ou remover todo o código linear (pedir autorização
+  antes de remover). Volta a COLOR_PIPELINE = 'srgb' até a decisão.
+
+[ ] A2.5 — PORTÃO A2
+  Aceite: aparência e custo caracterizados com 7 camadas e caminho de 11
+  camadas testado (o usuário fornece ou aprova as camadas extras). Aprovação
+  explícita do usuário.
+
+======================================================================
+FASE B — PLAYER COMPLETO
+======================================================================
+
+[ ] B.1 — Variantes e reconstrução controlada
+  Arquivos: src/core/player.js
+  Fazer:
+    1. Extrair a carga de camadas da A.10 numa função interna
+       buildVariant(variantId, generation, signal).
+    2. setVariant(id): id inexistente → 'error' invalid-scene. Senão
+       generation + abort (R§9.2); preparar as camadas da nova variante;
+       recursos de assets/camadas que não existem na nova variante são
+       liberados SÓ depois da nova estar pronta, se o orçamento permitir
+       (orçamento entra na B.4; até lá, liberar depois).
+    3. Chave do recurso no renderer: `${variantId}:${layerId}`.
+  Aceite: `npm run check`; demo com 2 variantes (a 2ª com 4 camadas) troca
+  sem vazamento: trocar 20 vezes seguidas e o usuário confirma memória estável
+  no gerenciador de tarefas do navegador.
+
+[ ] B.2 — Requisitos dinâmicos e resize
+  Arquivos: src/core/player.js
+  Fazer:
+    1. Ao processar DIRTY_REQUIREMENTS (R§10.3, com debounce de resize):
+       para cada camada: computeRequirements; satisfiesRequirements(atual,
+       novo) → só uniforms; senão preparar novo recurso (decodeSource com o
+       novo tamanho + prepareLayer, que troca sem buraco).
+    2. Exige menos → manter o recurso atual (memória recuperada na próxima
+       reconstrução).
+    3. Durante a troca de uma camada, ela continua desenhada com o recurso
+       antigo (prévia).
+    4. Re-buscar o blob pela URL/resolver (o player não guarda blobs, R:
+       blueprint §15).
+  Aceite: `npm run check`; o usuário redimensiona a janela de pequena para
+  grande e confirma nitidez restaurada e ausência de piscadas.
+
+[ ] B.3 — Modos de camada e foco por clique
+  Arquivos: src/core/player.js
+  Fazer:
+    1. Confirmar 'fixed' (sigma constante = fixedBlur) e 'sharp' (sigma 0,
+       com mipmaps) no cálculo de quadro.
+    2. Clique (R§16.5): converter ponteiro CSS → Render (× dpr × renderScale)
+       → percorrer camadas da FRENTE para trás, ignorando 'sharp'; para cada
+       uma, inverter R§12.12 (subtrair offset atual, dividir pela escala,
+       somar câmera) → px da composição → u,v no asset pelo placement →
+       sampleMask com raio = CLICK_TOLERANCE_CSS convertido para células da
+       máscara. Primeira que acertar → setFocus(depth resolvida).
+    3. Distinguir clique de arrasto: só conta se o ponteiro moveu < 4 px CSS
+       entre pointerdown e pointerup.
+  Aceite: `npm run check`; o usuário clica em objetos de 3 camadas e o foco
+  vai para a camada correta, inclusive com parallax deslocado.
+
+[ ] B.4 — Memória, orçamento e preset automático
+  Arquivos: src/core/quality/budget.js, src/core/quality/presets.js,
+            src/core/player.js, tests/budget.test.js, tests/presets.test.js
+  Fazer:
+    1. budget.js: R§13.3 completo, com testes (soma de níveis de 1000×600 com
+       3 níveis = (1000×600 + 500×300 + 250×150) × 4).
+    2. presets.js: chooseAutoPreset (R§13.1), com testes.
+    3. player: antes de preparar cada camada, somar a estimativa; se passar
+       de TEXTURE_BUDGET_BYTES → parar a carga, emitir 'memory-budget-exceeded'
+       com sugestão de preset/variante menor.
+    4. 'auto': estimar a cena com requirements dos 3 presets (sem decodificar
+       imagens: usar contentRect = placement nesta estimativa) e escolher com
+       chooseAutoPreset. Emitir 'quality-change' reason 'auto-initial'.
+    5. Incluir estimatedBytes no DiagnosticsSample.
+  Aceite: `npm run check`.
+
+[ ] B.5 — Deriva, teclado, roda e movimento reduzido
+  Arquivos: src/core/player.js
+  Fazer:
+    1. Deriva (R§12.8): se motion.drift e sem entrada por DRIFT_IDLE_SEC,
+       inputTarget = computeDriftInput*(tempo). Loop continua enquanto a
+       deriva estiver ativa.
+    2. Teclado e Alt+roda (R§16.5).
+    3. prefers-reduced-motion (R§12.10), escutando mudanças.
+  Aceite: `npm run check`; o usuário testa teclado, Alt+roda e a emulação de
+  movimento reduzido no DevTools.
+
+[ ] B.6 — fpsTarget e governador
+  Arquivos: src/core/quality/governor.js, tests/governor.test.js,
+            src/core/player.js
+  Fazer:
+    1. governor.js exatamente como R§13.4, com testes: < 120 amostras → null;
+       30% lentas → 'step-down'; cooldown respeitado; nunca sobe; para após
+       2 descidas sem melhora.
+    2. player: só com preset do usuário 'auto'; cada quadro ATIVO alimenta
+       push(frameMs, 1000/alvo, agora); 'step-down' → próximo degrau de
+       RENDER_SCALE_STEPS, setViewport, notifyStepApplied, emitir
+       'quality-change' reason 'governor-slow-frames'. Último degrau → não desce.
+    3. fpsTarget 30 e 'free' (R§16.4).
+    4. CONDICIONADO (só com aprovação do usuário): medição de GPU com
+       EXT_disjoint_timer_query_webgl2, leitura assíncrona nos quadros
+       seguintes, descartando resultados com GPU_DISJOINT_EXT.
+  Aceite: `npm run check`.
+
+[ ] B.7 — Poster, perda de contexto e fallback
+  Arquivos: src/core/render/renderer.js, src/core/player.js
+  Fazer:
+    1. Poster: se posterAssetId, resolver a URL/Blob e mostrar o <img> durante
+       a carga; esconder após 'ready'. Blob → URL.createObjectURL (revogar ao
+       trocar/dispose).
+    2. renderer: listeners webglcontextlost (preventDefault, marcar perdido,
+       callback onContextLost) e webglcontextrestored (recriar programas,
+       geometria; recursos de camada esvaziados; callback onContextRestored).
+    3. player: perda → abort dos preparos, parar loop, mostrar poster.
+       Restauração → reconstruir a variante atual. Contador de falhas: após 2
+       falhas, tentar preset 'low'; persistindo, 'context-lost-unrecoverable'
+       + poster.
+    4. Sem WebGL2: poster + 'webgl-unavailable'.
+    5. Todos os erros fatais: R§16.6.
+  Aceite: `npm run check`; o usuário testa no console com
+  gl.getExtension('WEBGL_lose_context').loseContext() / restoreContext()
+  (fornecer o snippet) e confirma a recuperação.
+
+[ ] B.8 — Pacote do player e carga por URL
+  Arquivos: nenhum novo (usa vite.config.js)
+  Fazer:
+    1. `npm run build:player` gera dist/player/parajaca-player.js.
+    2. Verificar com grep que o bundle não contém código de src/studio.
+    3. Instruir o usuário a publicar uma pasta com scene.json + assets/ +
+       parajaca-player.js e carregar por URL num HTML simples (fornecer o HTML
+       mínimo na conversa, sem criar arquivo).
+  Aceite: build sem erro; bundle sem studio.
+
+[ ] B.9 — PORTÃO B
+  Aceite (usuário): player funciona por URL; trocas repetidas de variante e de
+  tamanho de janela sem crescimento de memória; perda/restauração de contexto
+  ok; fallback ok; variante econômica (4 camadas, low) a 60 fps no T480.
+
+======================================================================
+FASE C — ESTÚDIO
+======================================================================
+
+[ ] C.1 — API interna do player para o estúdio
+  Arquivos: src/core/player.js, src/core/render/shaders.js,
+            src/core/render/renderer.js
+  Fazer:
+    1. edit(command) com a union PlayerCommand de R§16.2; cada tipo marca as
+       flags de R§10.3. 'replace-scene': validateScene; camadas/assets
+       inalterados reaproveitam recursos; novos são preparados; removidos
+       liberados.
+    2. getScene(), setRenderScaleOverride(scale|null).
+    3. capturePoster(type = 'image/webp', quality = 0.9): forçar um desenho
+       síncrono e chamar canvas.toBlob na MESMA tarefa logo após o draw
+       (preserveDrawingBuffer é false).
+    4. Modo revelação: setRevealMode(layerId|null). Com layerId: input forçado
+       a ±1 alternando a cada 1.5 s (X e, se axisY, Y), e outlineFlags = 1 nas
+       camadas à frente da camada escolhida. Shader de composição ganha
+       uniform u_outline: se 1, outColor = vec4(1.0, 0.85, 0.2, 1.0) ×
+       step(0.05, abs(a(lod) − a(lod + 2.0))) (contorno a partir da diferença
+       de alfa entre níveis).
+  Aceite: `npm run check`.
+
+[ ] C.2 — Esqueleto do estúdio
+  Arquivos: src/studio/index.html, studio.css, app.js, store.js, strings.js
+  Fazer:
+    1. Layout: barra lateral esquerda (cenas/variantes/camadas), área central
+       (player), barra lateral direita (painéis de controle), rodapé
+       (diagnóstico). CSS com variáveis em :root, sem framework.
+    2. store.js e strings.js conforme R§17.1 e R§17.3.
+    3. app.js: cria store, player (assetResolver do IndexedDB — stub que lança
+       até a C.3) e monta os painéis existentes.
+  Aceite: `npm run check`; http://localhost:5173/src/studio/ abre sem erro.
+
+[ ] C.3 — Persistência IndexedDB
+  Arquivos: src/studio/storage.js, src/studio/app.js, src/studio/strings.js
+  Fazer: R§17.4 completo; requestPersistence no início; exibir aviso de cota e
+  aviso de que o navegador pode apagar dados (a exportação é a garantia).
+  Aceite: `npm run check`; criar, recarregar a página e reabrir um projeto.
+
+[ ] C.4 — Importação de imagens
+  Arquivos: src/studio/import.js, src/studio/panels/import-panel.js,
+            src/studio/strings.js
+  Fazer:
+    1. Seleção múltipla; IMPORT_SUFFIX_REGEX; _1 = fundo (order 0); opção
+       "inverter ordem".
+    2. Validações, cada uma com mensagem em STRINGS: sufixo duplicado ou
+       faltando, < 4 ou > 11 camadas, MIME, dimensões decodificadas, proporção
+       diferente da composição, maior que maxTextureSize, falha de rasterização.
+    3. SVG: implementar svg-source.js (R§15.3) e avisar sobre recursos externos
+       e fontes web.
+    4. Gerar Scene com assets (path 'assets/<id>.<ext>'), salvar blobs e projeto.
+  Arquivos extra: src/core/sources/svg-source.js
+  Aceite: `npm run check`; importar as 7 PNGs da demo cria cena válida.
+
+[ ] C.5 — Painéis de cena, variante e camadas
+  Arquivos: src/studio/panels/scenes-panel.js, variants-panel.js,
+            layers-panel.js, strings.js, store.js
+  Fazer: criar/duplicar/renomear/excluir cena e variante (excluir pede
+  confirmação); camadas: substituir asset, reordenar, profundidade (auto ou
+  manual), modo de foco, fixedBlur. Cada mudança: store → player.edit → salvar.
+  Aceite: `npm run check`; edições refletem no player sem recarregar.
+
+[ ] C.6 — Painéis de óptica, movimento, enquadramento e qualidade
+  Arquivos: src/studio/panels/optics-panel.js, motion-panel.js,
+            framing-panel.js, quality-panel.js, strings.js
+  Fazer: controles principais (foco, abertura, intensidade, qualidade) sempre
+  visíveis; avançados (tolerância, faixa de foco, blur máximo, respiração,
+  deriva, escalas) num <details>. Enquadramento: clique sobre miniatura define
+  pointOfInterest. Aviso quando isMarginInsufficient (expor via evento interno
+  ou getter @internal getLayoutInfo()).
+  Aceite: `npm run check`.
+
+[ ] C.7 — Revelação e diagnóstico
+  Arquivos: src/studio/panels/reveal-panel.js, src/studio/diagnostics.js
+  Fazer: botão de revelação com escolha da camada; diagnóstico com FPS, p95,
+  p99, memória estimada, overdraw, renderScale (mesmo método da A.13).
+  Aceite: `npm run check`.
+
+[ ] C.8 — Poster, exportação e importação .parajaca
+  Arquivos: src/studio/poster.js, src/studio/zip.js, src/studio/panels/
+            export-panel.js, strings.js, package.json
+  Fazer:
+    1. `npm install fflate`.
+    2. poster.js: player.capturePoster → asset poster (posterAssetId).
+    3. zip.js: exportar (R: blueprint §7.5) e importar com os limites de R§17.6;
+       importação valida scene.json com validateScene e restaura no IndexedDB
+       com IDs preservados.
+  Aceite: `npm run check`; exportar, apagar o projeto, importar → cena
+  equivalente; pasta descompactada servida por HTTP carrega no player por URL.
+
+[ ] C.9 — PORTÃO C
+  Aceite (usuário): criar, salvar, restaurar e publicar uma cena sem depender
+  do estúdio de origem.
+
+======================================================================
+FASE D — EVOLUÇÃO (somente com pedido explícito do usuário)
+======================================================================
+
+[ ] D.0 — Antes de qualquer item: o usuário escolhe a extensão e apresenta a
+  evidência do critério de entrada (blueprint §25). Sem isso, nada é feito.
+  Candidatas: perfil de celular (presets, tetos, FPS, toque/pan-y);
+  blur residual em cache; bicúbica; 'fixed' em resolução reduzida; malha
+  justa; impostor do fundo; Web Component <parajaca-scene>; histórico de
+  edição; autofoco; demais itens do §25.
+  Regra: nenhuma extensão duplica o motor. Cada uma recebe etapas novas
+  escritas pelo usuário/arquiteto neste arquivo antes da implementação.
