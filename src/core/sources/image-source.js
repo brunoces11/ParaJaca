@@ -2,6 +2,8 @@
 // Implements R§15. Minimal version for Phase A.
 
 import { ParaJacaError, ERROR_CODES, isAbortError } from '../errors.js';
+import { inspectVector } from './media-source.js';
+import { rasterizeSvg } from './svg-source.js';
 
 /**
  * @typedef {{ width: number, height: number, data: Uint8Array }} AlphaMask
@@ -27,6 +29,7 @@ import { ParaJacaError, ERROR_CODES, isAbortError } from '../errors.js';
  * @property {{ left: boolean, top: boolean, right: boolean, bottom: boolean }} croppedSides
  * @property {boolean} opaque
  * @property {AlphaMask | null} alphaMask
+ * @property {import('./media-source.js').VectorInfo} [vector]
  */
 
 /**
@@ -83,7 +86,9 @@ async function resolveBlob(asset, resolver, signal) {
     }
   }
 
-  if (resolved instanceof Blob) {
+  // Files supplied by a parent window/iframe belong to a different Blob constructor.
+  const tag = Object.prototype.toString.call(resolved);
+  if (resolved instanceof Blob || tag === '[object Blob]' || tag === '[object File]') {
     return resolved;
   }
 
@@ -106,6 +111,11 @@ export async function analyzeSource(asset, layer, resolver, signal) {
   signal.throwIfAborted();
   const blob = await resolveBlob(asset, resolver, signal);
   signal.throwIfAborted();
+  const vector = asset.type === 'svg' || asset.type === 'lottie' || asset.type === 'dotlottie'
+    ? await inspectVector(blob, asset.type, signal) : undefined;
+  if (vector && (Math.abs(vector.width - asset.width) > 1e-4 || Math.abs(vector.height - asset.height) > 1e-4)) {
+    throw new ParaJacaError(ERROR_CODES.ASSET_LOAD_FAILED, 'Asset dimensions differ from the file; reimport the asset', { assetId: asset.id });
+  }
 
   return {
     blob,
@@ -113,6 +123,7 @@ export async function analyzeSource(asset, layer, resolver, signal) {
     croppedSides: { left: false, top: false, right: false, bottom: false },
     opaque: asset.type === 'jpg',
     alphaMask: null,
+    vector,
   };
 }
 
@@ -128,10 +139,11 @@ export async function analyzeSource(asset, layer, resolver, signal) {
 export async function decodeSource(analysis, asset, layer, contentSizeTex, signal) {
   signal.throwIfAborted();
 
-  if (asset.type === 'svg') {
-    throw new ParaJacaError(ERROR_CODES.ASSET_LOAD_FAILED, 'SVG not supported yet', {
-      assetId: asset.id,
-    });
+  if (analysis.vector?.kind === 'svg' && !analysis.vector.animated) {
+    return rasterizeSvg(analysis.vector.text, contentSizeTex.width, contentSizeTex.height, signal);
+  }
+  if (analysis.vector) {
+    throw new ParaJacaError(ERROR_CODES.ASSET_LOAD_FAILED, 'Animated assets require the animation adapter', { assetId: asset.id });
   }
 
   try {
@@ -142,7 +154,7 @@ export async function decodeSource(analysis, asset, layer, contentSizeTex, signa
       premultiplyAlpha: 'premultiply',
       colorSpaceConversion: 'default',
     });
-    signal.throwIfAborted();
+    if (signal.aborted) { bitmap.close(); signal.throwIfAborted(); }
     return bitmap;
   } catch (err) {
     if (isAbortError(err)) throw err;

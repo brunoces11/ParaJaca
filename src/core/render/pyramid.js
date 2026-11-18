@@ -25,6 +25,43 @@ export function computeLevelSizes(size, levels) {
   return result;
 }
 
+/** @typedef {{ framebuffer: WebGLFramebuffer, sizes: Size[], temps: WebGLTexture[] }} PyramidResources */
+
+/** Allocate scratch storage once for a changing layer.
+ * @param {WebGL2RenderingContext} gl @param {Size} size @param {number} levels
+ * @returns {PyramidResources} */
+export function createPyramidResources(gl, size, levels) {
+  const framebuffer = gl.createFramebuffer();
+  if (!framebuffer) throw new ParaJacaError(ERROR_CODES.WEBGL_UNAVAILABLE, 'Failed to allocate animation framebuffer');
+  const sizes = computeLevelSizes(size, levels);
+  /** @type {WebGLTexture[]} */
+  const temps = [];
+  try {
+    for (let k = 1; k < levels; k++) {
+      const texture = gl.createTexture();
+      if (!texture) throw new ParaJacaError(ERROR_CODES.WEBGL_UNAVAILABLE, 'Failed to allocate animation scratch texture');
+      temps.push(texture);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, sizes[k].width, sizes[k - 1].height);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    }
+    return { framebuffer, sizes, temps };
+  } catch (error) {
+    for (const texture of temps) gl.deleteTexture(texture);
+    gl.deleteFramebuffer(framebuffer);
+    throw error;
+  } finally { gl.bindTexture(gl.TEXTURE_2D, null); }
+}
+
+/** @param {WebGL2RenderingContext} gl @param {PyramidResources} resources */
+export function disposePyramidResources(gl, resources) {
+  for (const texture of resources.temps) gl.deleteTexture(texture);
+  gl.deleteFramebuffer(resources.framebuffer);
+}
+
 /**
  * Builds mipmap pyramid for an immutable WebGLTexture using separable H/V blur passes.
  * @param {WebGL2RenderingContext} gl
@@ -36,6 +73,7 @@ export function computeLevelSizes(size, levels) {
  * @param {number} canvasWidth
  * @param {number} canvasHeight
  * @param {boolean} [isDiagnostics=false]
+ * @param {PyramidResources} [reusable]
  */
 export function buildPyramid(
   gl,
@@ -47,16 +85,17 @@ export function buildPyramid(
   canvasWidth,
   canvasHeight,
   isDiagnostics = false,
+  reusable,
 ) {
   if (levels <= 1) return;
 
-  const fb = gl.createFramebuffer();
+  const fb = reusable ? reusable.framebuffer : gl.createFramebuffer();
   if (!fb) {
     throw new ParaJacaError(ERROR_CODES.WEBGL_UNAVAILABLE, 'Failed to create framebuffer for pyramid');
   }
   gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
 
-  const blendWasEnabled = gl.isEnabled(gl.BLEND);
+  const blendWasEnabled = reusable ? false : gl.isEnabled(gl.BLEND);
   if (blendWasEnabled) {
     gl.disable(gl.BLEND);
   }
@@ -66,25 +105,27 @@ export function buildPyramid(
   gl.activeTexture(gl.TEXTURE0);
   gl.uniform1i(pyramidProgram.uniforms.u_src, 0);
 
-  const levelSizes = computeLevelSizes(textureSize, levels);
+  const levelSizes = reusable ? reusable.sizes : computeLevelSizes(textureSize, levels);
 
   for (let k = 1; k < levels; k++) {
     const srcSize = levelSizes[k - 1];
     const dstSize = levelSizes[k];
 
     // 1) Temp texture: RGBA8, 1 level, size (w_k, h_{k-1})
-    const temp = gl.createTexture();
+    const temp = reusable ? reusable.temps[k - 1] : gl.createTexture();
     if (!temp) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.deleteFramebuffer(fb);
       throw new ParaJacaError(ERROR_CODES.WEBGL_UNAVAILABLE, 'Failed to create temp texture for pyramid');
     }
     gl.bindTexture(gl.TEXTURE_2D, temp);
-    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, dstSize.width, srcSize.height);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    if (!reusable) {
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, dstSize.width, srcSize.height);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    }
 
     // 2) Horizontal pass: FB -> temp; samples texture at srcLod = k - 1
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, temp, 0);
@@ -121,14 +162,14 @@ export function buildPyramid(
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
     // 4) Delete temp texture
-    gl.deleteTexture(temp);
+    if (!reusable) gl.deleteTexture(temp);
   }
 
   // Restore state
   gl.bindTexture(gl.TEXTURE_2D, null);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, null, 0);
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  gl.deleteFramebuffer(fb);
+  if (!reusable) gl.deleteFramebuffer(fb);
 
   gl.bindVertexArray(null);
   gl.useProgram(null);

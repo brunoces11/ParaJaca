@@ -1,5 +1,6 @@
 // Main player facade: lifecycle, DOM, loading, layout, animated loop, pointer input, and diagnostics.
-// Implements R§16, R§10.1, R§12.6-R§12.12. Zero dynamic allocations in the hot path.
+// Implements R§16, R§10.1, R§12.6-R§12.12. Core frame buffers are reused;
+// optional animation engines manage their own bounded working data.
 
 import { ParaJacaError, ERROR_CODES, isAbortError } from './errors.js';
 import { cloneScene, getVariant } from './scene/model.js';
@@ -26,6 +27,7 @@ import { QUALITY_PRESETS } from './quality/presets.js';
 import { computeRequirements } from './quality/requirements.js';
 import { analyzeSource, decodeSource } from './sources/image-source.js';
 import { createRenderer, createFrameState } from './render/renderer.js';
+import { createAnimatedSource } from './sources/media-source.js';
 
 export const DIRTY_FRAME = 1;
 export const DIRTY_ORDER = 2;
@@ -93,6 +95,7 @@ export const WHEEL_FOCUS_STEP = 2;
  * @property {(preset: QualityPresetName) => void} setQuality
  * @property {(intensity: number, intensityY?: number) => void} setIntensity
  * @property {() => void} resize
+ * @property {(paused: boolean) => void} setAnimationPaused
  * @property {(event: string, handler: (payload: any) => void) => () => void} on
  * @property {() => void} dispose
  * @property {(command: PlayerCommand) => Promise<void>} edit
@@ -213,6 +216,35 @@ export function createPlayer(container, options = {}) {
   };
 
   const frameState = createFrameState();
+  const motionPreference = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  /** @type {Array<{ id: string, source: import('./sources/media-source.js').AnimatedSource }>} */
+  const animatedSources = [];
+  let animationTimeMs = 0;
+  /** @type {boolean | null} */
+  let animationPauseOverride = null;
+  let isSceneLoaded = false;
+
+  function clearAnimations() {
+    for (const entry of animatedSources) entry.source.dispose();
+    animatedSources.length = 0;
+  }
+
+  function animationsPaused() { return animationPauseOverride ?? motionPreference?.matches ?? false; }
+
+  /** @param {boolean} paused */
+  function setAnimationPaused(paused) {
+    animationPauseOverride = paused;
+    runtime.lastTimestamp = null;
+    emit('animation-state', { paused: animationsPaused(), count: animatedSources.length });
+    requestFrame();
+  }
+
+  function onMotionPreferenceChange() {
+    runtime.lastTimestamp = null;
+    emit('animation-state', { paused: animationsPaused(), count: animatedSources.length });
+    requestFrame();
+  }
+  motionPreference?.addEventListener('change', onMotionPreferenceChange);
 
   /** @type {DiagnosticsSample} */
   const diagnosticsSample = {
@@ -260,6 +292,8 @@ export function createPlayer(container, options = {}) {
     // Runtime-only Y-axis intensity (Ref px); the scene stores a single intensity (X, and Y by default).
     intensityY: 0,
     isPaused: false,
+    documentHidden: document.visibilityState === 'hidden',
+    intersectionHidden: false,
     lastTimestamp: /** @type {number | null} */ (null),
     lastDrawTimestamp: 0,
   };
@@ -272,7 +306,7 @@ export function createPlayer(container, options = {}) {
    * @param {boolean} [forceDraw=false]
    */
   function renderFrame(timestamp, forceDraw = false) {
-    if (!renderer || !config.scene || !runtime.variant || !runtime.layout || !runtime.resolvedDepths) {
+    if (!isSceneLoaded || !renderer || !config.scene || !runtime.variant || !runtime.layout || !runtime.resolvedDepths) {
       return;
     }
 
@@ -295,10 +329,26 @@ export function createPlayer(container, options = {}) {
     }
 
     // Delta time in seconds
+    const animationDtMs = runtime.lastTimestamp !== null ? Math.max(0, timestamp - runtime.lastTimestamp) : 0;
     const dtSec = runtime.lastTimestamp !== null
       ? clampDt((timestamp - runtime.lastTimestamp) / 1000)
       : 0;
     runtime.lastTimestamp = timestamp;
+    if (!animationsPaused()) {
+      animationTimeMs += animationDtMs;
+      for (let i = 0; i < animatedSources.length; i++) {
+        const entry = animatedSources[i];
+        try {
+          if (entry.source.update(animationTimeMs)) renderer.updateLayer(entry.id);
+        } catch (error) {
+          // Stop a failed source once; errors are reported through the normal player channel.
+          animationPauseOverride = true;
+          handleError(error);
+          emit('animation-state', { paused: true, count: animatedSources.length });
+          break;
+        }
+      }
+    }
 
     // Smooth inputs
     const inputK = computeInputK(motion.smoothing);
@@ -416,18 +466,19 @@ export function createPlayer(container, options = {}) {
       runtime.inputCurrentY = runtime.inputTargetY;
       runtime.focusCurrent = runtime.focusTarget;
       // Loop halts until triggered by new input or command
-    } else {
+    }
+    if (!converged || (animatedSources.length > 0 && !animationsPaused())) {
       requestFrame();
     }
   }
 
   function requestFrame() {
-    if (rafId !== 0 || runtime.isPaused) return;
-    rafId = requestAnimationFrame((ts) => {
-      rafId = 0;
-      renderFrame(ts);
-    });
+    if (rafId !== 0 || runtime.isPaused || !isSceneLoaded) return;
+    rafId = requestAnimationFrame(onAnimationFrame);
   }
+
+  /** @param {number} timestamp */
+  function onAnimationFrame(timestamp) { rafId = 0; renderFrame(timestamp); }
 
   // Pointer event handlers (R§16.5)
   /**
@@ -473,14 +524,18 @@ export function createPlayer(container, options = {}) {
   canvas.addEventListener('wheel', onWheel, { passive: false });
 
   // Visibility & Intersection observers for pause/resume (R§16.4)
-  function onVisibilityChange() {
-    if (document.visibilityState === 'hidden') {
-      runtime.isPaused = true;
+  function refreshVisibility() {
+    runtime.isPaused = runtime.documentHidden || runtime.intersectionHidden;
+    if (runtime.isPaused) {
+      if (rafId !== 0) { cancelAnimationFrame(rafId); rafId = 0; }
     } else {
-      runtime.isPaused = false;
       runtime.lastTimestamp = null;
       requestFrame();
     }
+  }
+  function onVisibilityChange() {
+    runtime.documentHidden = document.visibilityState === 'hidden';
+    refreshVisibility();
   }
   document.addEventListener('visibilitychange', onVisibilityChange);
 
@@ -489,13 +544,9 @@ export function createPlayer(container, options = {}) {
   if (typeof IntersectionObserver !== 'undefined') {
     intersectionObserver = new IntersectionObserver((entries) => {
       const entry = entries[0];
-      if (!entry.isIntersecting) {
-        runtime.isPaused = true;
-      } else {
-        runtime.isPaused = false;
-        runtime.lastTimestamp = null;
-        requestFrame();
-      }
+      if (!entry) return;
+      runtime.intersectionHidden = !entry.isIntersecting;
+      refreshVisibility();
     });
     intersectionObserver.observe(container);
   }
@@ -656,6 +707,16 @@ export function createPlayer(container, options = {}) {
     const controller = new AbortController();
     runtime.abortController = controller;
     const { signal } = controller;
+    isSceneLoaded = false;
+    if (rafId !== 0) { cancelAnimationFrame(rafId); rafId = 0; }
+    clearAnimations();
+    animationTimeMs = 0;
+    runtime.lastTimestamp = null;
+    if (runtime.variant) {
+      for (const layer of runtime.variant.layers) renderer.releaseLayer(layer.id);
+    }
+    runtime.layerRequirements.clear();
+    runtime.layerRectComp.clear();
 
     try {
       signal.throwIfAborted();
@@ -765,23 +826,38 @@ export function createPlayer(container, options = {}) {
           );
         }
 
-        const bitmap = await decodeSource(analysis, asset, layer, req.contentSizeTex, signal);
+        /** @type {import('./sources/media-source.js').AnimatedSource | null} */
+        let animated = null;
+        /** @type {ImageBitmap} */
+        let bitmap;
+        try {
+          if (analysis.vector && (analysis.vector.kind === 'lottie' || analysis.vector.animated)) {
+            animated = await createAnimatedSource(analysis.vector, req.contentSizeTex.width, req.contentSizeTex.height, signal);
+            bitmap = await createImageBitmap(animated.canvas, { premultiplyAlpha: 'premultiply', colorSpaceConversion: 'default' });
+          } else bitmap = await decodeSource(analysis, asset, layer, req.contentSizeTex, signal);
+        } catch (error) { animated?.dispose(); throw error; }
         if (generation !== runtime.generation) {
           bitmap.close();
+          animated?.dispose();
           return;
         }
 
-        await renderer.prepareLayer(
+        try { await renderer.prepareLayer(
           layer.id,
           {
             bitmap,
             contentRectComp: analysis.contentRectComp,
             opaque: analysis.opaque,
+            canvas: animated?.canvas,
           },
           req,
           signal,
-        );
-        if (generation !== runtime.generation) return;
+        ); } catch (error) { animated?.dispose(); throw error; }
+        if (generation !== runtime.generation) { animated?.dispose(); return; }
+        if (animated) animatedSources.push({ id: layer.id, source: animated });
+        if (analysis.vector) {
+          for (const message of analysis.vector.warnings) emit('warning', { assetId: asset.id, message });
+        }
 
         // Calculate rectComp (R§12.12)
         const texPerCompX = req.contentSizeTex.width / analysis.contentRectComp.width;
@@ -807,11 +883,15 @@ export function createPlayer(container, options = {}) {
         edgeLayers: [],
       });
 
+      isSceneLoaded = true;
+      runtime.isPaused = runtime.documentHidden || runtime.intersectionHidden;
       emit('ready', {});
+      emit('animation-state', { paused: animationsPaused(), count: animatedSources.length });
       runtime.dirtyFlags |= DIRTY_FRAME;
       requestFrame();
     } catch (err) {
       if (generation === runtime.generation) {
+        clearAnimations();
         handleError(err);
       }
     }
@@ -833,6 +913,9 @@ export function createPlayer(container, options = {}) {
   function dispose() {
     runtime.generation++;
     runtime.abortController?.abort();
+    isSceneLoaded = false;
+    clearAnimations();
+    motionPreference?.removeEventListener('change', onMotionPreferenceChange);
     if (rafId !== 0) {
       cancelAnimationFrame(rafId);
       rafId = 0;
@@ -859,6 +942,7 @@ export function createPlayer(container, options = {}) {
   // Return Player interface conforming to R§16.1 & R§16.2
   return {
     load,
+    setAnimationPaused,
     async setVariant() {},
     setFocus,
     setQuality,

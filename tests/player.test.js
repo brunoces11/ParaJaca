@@ -41,6 +41,12 @@ function createElement() {
 
 function createHarness() {
   const windowTarget = Object.assign(new EventTarget(), { devicePixelRatio: 1 });
+  const documentTarget = Object.assign(new EventTarget(), {
+    createElement, documentElement: new EventTarget(), baseURI: 'http://localhost/demo/',
+    visibilityState: 'visible',
+  });
+  /** @type {IntersectionObserverCallback | null} */
+  let intersectionCallback = null;
   /** @type {Map<number, FrameRequestCallback>} */
   const callbacks = new Map();
   let nextId = 0;
@@ -57,18 +63,21 @@ function createHarness() {
     },
     getLimits() { return { maxTextureSize: 4096 }; },
     prepareLayer() { preparedCount++; return Promise.resolve(); },
+    releaseLayer() {},
     /** @param {FrameState} frame */
     draw(frame) { drawn = structuredClone(frame); },
     dispose() {},
   };
   const globals = {
     window: windowTarget,
-    document: Object.assign(new EventTarget(), {
-      createElement, documentElement: new EventTarget(), baseURI: 'http://localhost/demo/',
-      visibilityState: 'visible',
-    }),
+    document: documentTarget,
     ResizeObserver: undefined,
-    IntersectionObserver: undefined,
+    IntersectionObserver: class {
+      /** @param {IntersectionObserverCallback} callback */
+      constructor(callback) { intersectionCallback = callback; }
+      observe() {}
+      disconnect() {}
+    },
     /** @param {FrameRequestCallback} callback */
     requestAnimationFrame(callback) { callbacks.set(++nextId, callback); return nextId; },
     /** @param {number} id */
@@ -113,6 +122,19 @@ function createHarness() {
     },
     getFrame() { assert.ok(drawn); return drawn; },
     getPreparedCount() { return preparedCount; },
+    getPendingFrames() { return callbacks.size; },
+    /** @param {boolean} hidden */
+    setHidden(hidden) {
+      documentTarget.visibilityState = hidden ? 'hidden' : 'visible';
+      documentTarget.dispatchEvent(new Event('visibilitychange'));
+    },
+    /** @param {boolean} visible */
+    setIntersecting(visible) {
+      assert.ok(intersectionCallback);
+      intersectionCallback([
+        /** @type {IntersectionObserverEntry} */ (/** @type {unknown} */ ({ isIntersecting: visible })),
+      ], /** @type {IntersectionObserver} */ (/** @type {unknown} */ ({})));
+    },
     cleanup() {
       player.dispose();
       for (const { name, descriptor } of originals) {
@@ -122,6 +144,23 @@ function createHarness() {
     },
   };
 }
+
+test('visibility and viewport pauses cannot override one another', async (t) => {
+  const h = createHarness();
+  t.after(h.cleanup);
+  await h.player.load(createScene());
+  h.flush();
+  h.setHidden(true);
+  h.setIntersecting(true);
+  h.pointAt({ x: 1920, y: 1080 });
+  assert.equal(h.getPendingFrames(), 0, 'a visible intersection cannot resume a hidden document');
+  h.setIntersecting(false);
+  h.setHidden(false);
+  assert.equal(h.getPendingFrames(), 0, 'document visibility cannot resume an offscreen player');
+  h.setIntersecting(true);
+  assert.ok(h.getPendingFrames() > 0);
+  h.flush();
+});
 
 /** @returns {Scene} */
 function createScene() {

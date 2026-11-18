@@ -45,6 +45,18 @@ void main() {
 }
 `;
 
+// Canvas uploads use straight alpha by default; convert exactly once into the existing pipeline.
+export const ANIMATED_PREMULTIPLY_FRAGMENT_SOURCE = `#version 300 es
+precision highp float;
+uniform sampler2D u_src;
+uniform ivec2 u_offset;
+out vec4 outColor;
+void main() {
+  vec4 c = texelFetch(u_src, ivec2(gl_FragCoord.xy) - u_offset, 0);
+  outColor = vec4(c.rgb * c.a, c.a);
+}
+`;
+
 export const PYRAMID_FRAGMENT_SOURCE = `#version 300 es
 precision highp float;
 

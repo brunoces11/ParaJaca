@@ -160,6 +160,7 @@
       <input type="file" id="config-file" accept=".json,application/json" hidden>
       <div class="hud-hint">Salva os ajustes em JSON. As imagens devem ser carregadas separadamente.</div>
       <div id="config-status" role="status"></div>
+      <button type="button" class="btn" id="animation-toggle" disabled>Pausar animações</button>
       <!-- Controle de Foco -->
       <div class="hud-row">
         <div class="hud-row-header">
@@ -219,7 +220,7 @@
     </button>
     <div class="panel-body" id="layers-body">
       <div class="layers-toolbar">
-        <button type="button" class="btn" id="replace-open">Trocar imagens</button>
+        <button type="button" class="btn" id="replace-open">Importar imagem / animação</button>
         <button type="button" class="btn" id="reset-all">Zerar X/Y</button>
       </div>
       <div class="hud-hint">X/Y em px da composição (1920×1080). Camada 1 = fundo; a última é a mais próxima.</div>
@@ -230,15 +231,16 @@
   </aside>
 
   <dialog id="replace-dialog" aria-labelledby="replace-title">
-    <h2 id="replace-title">Trocar imagens das camadas</h2>
+    <h2 id="replace-title">Importar imagens e animações</h2>
     <p>
       Arraste as imagens para esta janela ou use “Selecionar imagens”. Arquivos terminados em <b>_1</b> … <b>_7</b>
       vão para a camada correspondente (1 = fundo); os demais entram nas camadas livres, na ordem do nome.
-      Camadas sem imagem nova mantêm a atual. Aceita PNG, JPG e WebP.
+      Camadas sem arquivo novo mantêm a atual. Aceita PNG, JPG, WebP, SVG, Lottie JSON e .lottie.
+      Use “Código SVG” na camada para colar o SVG. Animações Lottie iniciam em loop; scripts e expressões não são executados.
       Cada imagem mantém suas dimensões originais, maior ou menor que 1920×1080; ajuste o alinhamento em X/Y.
     </p>
     <div class="dialog-toolbar">
-      <button type="button" class="btn" id="replace-pick-many">Selecionar imagens…</button>
+      <button type="button" class="btn" id="replace-pick-many">Selecionar arquivos…</button>
       <button type="button" class="btn" id="replace-clear">Limpar seleção</button>
     </div>
     <div id="replace-slots"></div>
@@ -247,8 +249,19 @@
       <button type="button" class="btn" id="replace-cancel">Cancelar</button>
       <button type="button" class="btn primary" id="replace-apply" disabled>Trocar imagens</button>
     </div>
-    <input type="file" id="replace-files" accept="image/png,image/jpeg,image/webp" multiple hidden>
-    <input type="file" id="replace-slot-file" accept="image/png,image/jpeg,image/webp" hidden>
+    <input type="file" id="replace-files" accept=".png,.jpg,.jpeg,.webp,.svg,.json,.lottie" multiple hidden>
+    <input type="file" id="replace-slot-file" accept=".png,.jpg,.jpeg,.webp,.svg,.json,.lottie" hidden>
+  </dialog>
+
+  <dialog id="svg-code-dialog" aria-labelledby="svg-code-title">
+    <h2 id="svg-code-title">Inserir código SVG</h2>
+    <p>Cole o documento SVG completo. O tamanho usa width/height; na ausência, usa o viewBox. Animações SMIL compatíveis são reproduzidas; scripts não são executados.</p>
+    <textarea id="svg-code" aria-label="Código SVG" spellcheck="false" style="width:100%;min-height:220px;box-sizing:border-box;background:#10141d;color:#e5e7eb;padding:12px;font-family:monospace"></textarea>
+    <div id="svg-code-status" role="status"></div>
+    <div class="dialog-actions">
+      <button type="button" class="btn" id="svg-code-cancel">Cancelar</button>
+      <button type="button" class="btn primary" id="svg-code-apply">Inserir na camada</button>
+    </div>
   </dialog>
 
   <script type="module" src="/demo/main.js"></script>

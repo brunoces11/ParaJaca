@@ -13,8 +13,9 @@ import {
   COMPOSITE_FRAGMENT_SOURCE,
   PYRAMID_VERTEX_SOURCE,
   PYRAMID_FRAGMENT_SOURCE,
+  ANIMATED_PREMULTIPLY_FRAGMENT_SOURCE,
 } from './shaders.js';
-import { buildPyramid } from './pyramid.js';
+import { buildPyramid, createPyramidResources, disposePyramidResources, computeLevelSizes } from './pyramid.js';
 
 export const FRAME_CAPACITY = 11; // = MAX_LAYERS in scene/model.js
 
@@ -30,6 +31,8 @@ export const FRAME_CAPACITY = 11; // = MAX_LAYERS in scene/model.js
  * @property {LayerRequirements} requirements
  * @property {Rect} contentRectComp
  * @property {boolean} opaque
+ * @property {{ canvas: HTMLCanvasElement, raw: WebGLTexture, pyramid: import('./pyramid.js').PyramidResources } | null} dynamic
+ * @property {number} bytes
  */
 
 /**
@@ -87,6 +90,19 @@ export function createRenderer(canvas, options = {}) {
 
   /** @type {Map<string, LayerResource>} */
   const resources = new Map();
+  /** @type {{program: WebGLProgram, uniforms: Record<string, WebGLUniformLocation>} | null} */
+  let animatedProgram = null;
+  let allocatedBytes = 0;
+
+  /** @param {LayerResource} resource */
+  function deleteResource(resource) {
+    gl.deleteTexture(resource.texture);
+    if (resource.dynamic) {
+      gl.deleteTexture(resource.dynamic.raw);
+      disposePyramidResources(gl, resource.dynamic.pyramid);
+    }
+    allocatedBytes -= resource.bytes;
+  }
 
   let currentViewportWidth = 0;
   let currentViewportHeight = 0;
@@ -120,7 +136,7 @@ export function createRenderer(canvas, options = {}) {
   /**
    * Uploads texture, builds mip pyramid, and stores LayerResource.
    * @param {string} layerId
-   * @param {{ bitmap: ImageBitmap, contentRectComp: Rect, opaque: boolean }} source
+   * @param {{ bitmap: ImageBitmap, contentRectComp: Rect, opaque: boolean, canvas?: HTMLCanvasElement }} source
    * @param {LayerRequirements} requirements
    * @param {AbortSignal} signal
    * @returns {Promise<void>}
@@ -129,9 +145,23 @@ export function createRenderer(canvas, options = {}) {
     signal.throwIfAborted();
     const { bitmap, contentRectComp, opaque } = source;
     const { textureSize, levels, paddingTex } = requirements;
+    const sizes = computeLevelSizes(textureSize, levels);
+    let bytes = 0;
+    for (const size of sizes) bytes += size.width * size.height * 4;
+    if (source.canvas) {
+      bytes += source.canvas.width * source.canvas.height * 8;
+      for (let k = 1; k < sizes.length; k++) bytes += sizes[k].width * sizes[k - 1].height * 4;
+    }
+    if (allocatedBytes + bytes > 400 * 1024 * 1024) {
+      source.bitmap.close();
+      throw new ParaJacaError(ERROR_CODES.ASSET_LOAD_FAILED, 'Scene exceeds the 400 MB texture budget');
+    }
+    /** @type {LayerResource['dynamic']} */
+    let dynamic = null;
 
     const texture = gl.createTexture();
     if (!texture) {
+      bitmap.close();
       throw new ParaJacaError(ERROR_CODES.WEBGL_UNAVAILABLE, `Failed to create texture for layer ${layerId}`);
     }
 
@@ -168,9 +198,25 @@ export function createRenderer(canvas, options = {}) {
 
       signal.throwIfAborted();
 
+      if (source.canvas) {
+        if (!animatedProgram) animatedProgram = compileProgram(gl, 'animated-alpha', PYRAMID_VERTEX_SOURCE,
+          ANIMATED_PREMULTIPLY_FRAGMENT_SOURCE, ['u_src', 'u_offset']);
+        const raw = gl.createTexture();
+        if (!raw) throw new ParaJacaError(ERROR_CODES.WEBGL_UNAVAILABLE, 'Failed to allocate animation upload texture');
+        try {
+          gl.bindTexture(gl.TEXTURE_2D, raw);
+          gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, source.canvas.width, source.canvas.height);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+          dynamic = { canvas: source.canvas, raw, pyramid: createPyramidResources(gl, textureSize, levels) };
+        } catch (error) { gl.deleteTexture(raw); throw error; }
+      }
+
       const oldResource = resources.get(layerId);
       if (oldResource) {
-        gl.deleteTexture(oldResource.texture);
+        deleteResource(oldResource);
       }
 
       resources.set(layerId, {
@@ -178,11 +224,42 @@ export function createRenderer(canvas, options = {}) {
         requirements,
         contentRectComp,
         opaque,
+        dynamic,
+        bytes,
       });
+      allocatedBytes += bytes;
     } catch (err) {
       gl.deleteTexture(texture);
+      bitmap.close();
+      if (dynamic) { gl.deleteTexture(dynamic.raw); disposePyramidResources(gl, dynamic.pyramid); }
       throw err;
     }
+  }
+
+  /** Update an existing texture and its blur levels without allocating GPU resources.
+   * @param {string} layerId */
+  function updateLayer(layerId) {
+    const resource = resources.get(layerId);
+    if (!resource || !resource.dynamic || !animatedProgram) return;
+    const dynamic = resource.dynamic;
+    const req = resource.requirements;
+    gl.disable(gl.BLEND);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, dynamic.raw);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, dynamic.canvas);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dynamic.pyramid.framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, resource.texture, 0);
+    gl.viewport(req.paddingTex.left, req.paddingTex.top, dynamic.canvas.width, dynamic.canvas.height);
+    gl.useProgram(animatedProgram.program);
+    gl.bindVertexArray(quad.vao);
+    gl.uniform1i(animatedProgram.uniforms.u_src, 0);
+    gl.uniform2i(animatedProgram.uniforms.u_offset, req.paddingTex.left, req.paddingTex.top);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    buildPyramid(gl, pyramidProgram, quad, resource.texture, req.textureSize, req.levels,
+      currentViewportWidth, currentViewportHeight, false, dynamic.pyramid);
+    gl.viewport(0, 0, currentViewportWidth, currentViewportHeight);
   }
 
   /**
@@ -249,7 +326,7 @@ export function createRenderer(canvas, options = {}) {
   function releaseLayer(layerId) {
     const res = resources.get(layerId);
     if (res) {
-      gl.deleteTexture(res.texture);
+      deleteResource(res);
       resources.delete(layerId);
     }
   }
@@ -285,18 +362,20 @@ export function createRenderer(canvas, options = {}) {
    */
   function dispose() {
     for (const res of resources.values()) {
-      gl.deleteTexture(res.texture);
+      deleteResource(res);
     }
     resources.clear();
 
     gl.deleteProgram(compositeProgram.program);
     gl.deleteProgram(pyramidProgram.program);
+    if (animatedProgram) gl.deleteProgram(animatedProgram.program);
     gl.deleteVertexArray(quad.vao);
     gl.deleteBuffer(quad.buffer);
   }
 
   return {
     prepareLayer,
+    updateLayer,
     releaseLayer,
     hasLayer,
     getLayerResource,

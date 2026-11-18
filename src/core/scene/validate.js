@@ -35,7 +35,7 @@ import {
  *             errors: string[] }} ValidationResult
  */
 
-const VALID_ASSET_TYPES = new Set(['png', 'webp', 'svg', 'jpg']);
+const VALID_ASSET_TYPES = new Set(['png', 'webp', 'svg', 'jpg', 'lottie', 'dotlottie']);
 const VALID_FOCUS_MODES = new Set(['dynamic', 'fixed', 'sharp']);
 const VALID_PRESETS = new Set(['auto', 'high', 'mid', 'low']);
 const VALID_FPS_TARGETS = new Set([60, 30, 'free']);
@@ -150,7 +150,7 @@ export function validateScene(input) {
       }
 
       if (typeof rawAsset.type !== 'string' || !VALID_ASSET_TYPES.has(rawAsset.type)) {
-        errors.push(`assets[${i}].type: expected one of 'png', 'webp', 'svg', 'jpg'`);
+        errors.push(`assets[${i}].type: expected PNG, WebP, SVG, JPG, Lottie JSON, or dotLottie`);
         assetOk = false;
       }
 

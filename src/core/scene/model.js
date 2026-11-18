@@ -4,7 +4,7 @@
 /** @typedef {{ width: number, height: number }} Size */
 /** @typedef {{ x: number, y: number }} Point */
 /** @typedef {{ x: number, y: number, width: number, height: number }} Rect */
-/** @typedef {'png' | 'webp' | 'svg' | 'jpg'} AssetType */
+/** @typedef {'png' | 'webp' | 'svg' | 'jpg' | 'lottie' | 'dotlottie'} AssetType */
 /** @typedef {'dynamic' | 'fixed' | 'sharp'} FocusMode */
 /** @typedef {'auto' | 'high' | 'mid' | 'low'} QualityPresetName */
 /** @typedef {60 | 30 | 'free'} FpsTarget */

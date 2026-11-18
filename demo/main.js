@@ -2,6 +2,7 @@
 // Connects player instance to UI controls, per-axis intensity, layer panel/dialog, and live performance telemetry.
 
 import { createPlayer } from '../src/core/player.js';
+import { inspectMediaFile } from '../src/core/sources/media-source.js';
 
 /** @typedef {import('../src/core/player.js').DiagnosticsSample} DiagnosticsSample */
 /** @typedef {import('../src/core/scene/model.js').QualityPresetName} QualityPresetName */
@@ -40,6 +41,7 @@ import { createPlayer } from '../src/core/player.js';
  * @property {PendingImage | null} pending
  * @property {HTMLImageElement} thumb
  * @property {HTMLElement} nameLabel
+ * @property {AbortController | null} importController
  */
 
 const container = /** @type {HTMLElement} */ (document.getElementById('player-container'));
@@ -81,14 +83,20 @@ const replaceCancelButton = /** @type {HTMLButtonElement} */ (document.getElemen
 const replaceApplyButton = /** @type {HTMLButtonElement} */ (document.getElementById('replace-apply'));
 const replaceFilesInput = /** @type {HTMLInputElement} */ (document.getElementById('replace-files'));
 const replaceSlotFileInput = /** @type {HTMLInputElement} */ (document.getElementById('replace-slot-file'));
+const svgCodeDialog = /** @type {HTMLDialogElement} */ (document.getElementById('svg-code-dialog'));
+const svgCode = /** @type {HTMLTextAreaElement} */ (document.getElementById('svg-code'));
+const svgCodeStatus = /** @type {HTMLElement} */ (document.getElementById('svg-code-status'));
+const svgCodeApply = /** @type {HTMLButtonElement} */ (document.getElementById('svg-code-apply'));
+const svgCodeCancel = /** @type {HTMLButtonElement} */ (document.getElementById('svg-code-cancel'));
+const animationToggle = /** @type {HTMLButtonElement} */ (document.getElementById('animation-toggle'));
+let svgCodeSlot = -1;
+let animationPaused = false;
 
 const SCENE_URL = new URL('scene.json', document.baseURI);
 const LAYER_SLIDER_SPAN_COMP = 500;
-// Same convention as IMPORT_SUFFIX_REGEX (scene/model.js, without svg); the demo may only import player.js (R§3.1).
-const LAYER_SUFFIX_REGEX = /_(\d{1,2})\.(png|webp|jpe?g)$/i;
-
-/** @type {Record<string, AssetType>} */
-const ASSET_TYPE_BY_MIME = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+// Numbered file suffixes address existing layers, including optional vector formats.
+const LAYER_SUFFIX_REGEX = /_(\d{1,2})\.(png|webp|jpe?g|svg|json|lottie)$/i;
+const ANIMATION_THUMB = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="48" viewBox="0 0 80 48"><rect width="80" height="48" fill="#15243a"/><path d="M32 12L54 24L32 36Z" fill="#60a5fa"/></svg>');
 
 let isBusy = false;
 let isSceneReady = false;
@@ -169,6 +177,13 @@ player.on('error', (payload) => {
   errorBox.style.display = 'block';
   errorBox.textContent = `[Erro: ${data.code}] ${data.message}`;
 });
+player.on('warning', (payload) => setLayersStatus(`Aviso: ${String(payload.message)}`));
+player.on('animation-state', (payload) => {
+  animationPaused = Boolean(payload.paused);
+  animationToggle.disabled = Number(payload.count) === 0;
+  animationToggle.textContent = animationPaused ? 'Reproduzir animações' : 'Pausar animações';
+});
+animationToggle.addEventListener('click', () => player.setAnimationPaused(!animationPaused));
 
 // Sync focus if player targets change programmatically (e.g. via Alt + Wheel)
 player.on('focus-change', (payload) => {
@@ -250,6 +265,7 @@ function setBusy(busy) {
  * @returns {string}
  */
 function thumbUrlFor(asset) {
+  if (asset.type === 'lottie' || asset.type === 'dotlottie') return ANIMATION_THUMB;
   return imageOverrides.get(asset.id)?.url ?? new URL(asset.path, SCENE_URL).href;
 }
 
@@ -628,7 +644,8 @@ function setDialogStatus(message, isError = false) {
 }
 
 function updateApplyState() {
-  replaceApplyButton.disabled = isBusy || !slots.some((slot) => slot.pending !== null);
+  replaceApplyButton.disabled = isBusy || slots.some((slot) => slot.importController !== null)
+    || !slots.some((slot) => slot.pending !== null);
 }
 
 /** @param {ReplaceSlot} slot */
@@ -647,6 +664,7 @@ function renderSlot(slot) {
 /** Releases every pending preview and empties the dialog rows. */
 function clearReplaceSlots() {
   for (const slot of slots) {
+    slot.importController?.abort();
     if (slot.pending) {
       URL.revokeObjectURL(slot.pending.previewUrl);
     }
@@ -685,7 +703,21 @@ function createReplaceSlotRow(layer, asset, number) {
 
   const row = document.createElement('div');
   row.className = 'slot-row';
-  row.append(thumb, title, pickButton);
+  const codeButton = document.createElement('button');
+  codeButton.type = 'button';
+  codeButton.className = 'btn';
+  codeButton.textContent = 'Código SVG';
+  codeButton.addEventListener('click', () => {
+    svgCodeSlot = index;
+    svgCode.value = '';
+    svgCodeStatus.textContent = '';
+    svgCodeDialog.showModal();
+    svgCode.focus();
+  });
+  const actions = document.createElement('div');
+  actions.className = 'layers-toolbar';
+  actions.append(pickButton, codeButton);
+  row.append(thumb, title, actions);
 
   /** @type {ReplaceSlot} */
   const slot = {
@@ -694,6 +726,7 @@ function createReplaceSlotRow(layer, asset, number) {
     currentName: asset ? asset.name : '—',
     currentThumbUrl: asset ? thumbUrlFor(asset) : '',
     pending: null,
+    importController: null,
     thumb,
     nameLabel,
   };
@@ -727,28 +760,25 @@ function openReplaceDialog() {
 async function setSlotImage(index, file) {
   const slot = slots[index];
   if (!slot) return null;
-  const type = ASSET_TYPE_BY_MIME[file.type];
-  if (!type) {
-    return `${file.name}: formato não suportado (use PNG, JPG ou WebP).`;
-  }
-
-  let bitmap;
-  try {
-    bitmap = await createImageBitmap(file);
-  } catch (err) {
-    return `${file.name}: não foi possível ler a imagem (${err instanceof Error ? err.message : String(err)}).`;
-  }
-  const { width, height } = bitmap;
-  bitmap.close();
-
-  if (slots[index] !== slot) return null; // dialog was closed or reopened meanwhile
-  if (slot.pending) {
-    URL.revokeObjectURL(slot.pending.previewUrl);
-  }
-  slot.pending = { file, type, width, height, previewUrl: URL.createObjectURL(file) };
-  renderSlot(slot);
+  slot.importController?.abort();
+  const controller = new AbortController();
+  slot.importController = controller;
   updateApplyState();
-  return null;
+  try {
+    const { type, width, height } = await inspectMediaFile(file, controller.signal);
+    if (slots[index] !== slot || controller.signal.aborted) return null;
+    if (slot.pending) URL.revokeObjectURL(slot.pending.previewUrl);
+    const previewUrl = type === 'lottie' || type === 'dotlottie' ? ANIMATION_THUMB : URL.createObjectURL(file);
+    slot.pending = { file, type, width, height, previewUrl };
+    renderSlot(slot);
+    return null;
+  } catch (err) {
+    if (controller.signal.aborted) return null;
+    return `${file.name}: não foi possível importar (${err instanceof Error ? err.message : String(err)}).`;
+  } finally {
+    if (slot.importController === controller) slot.importController = null;
+    updateApplyState();
+  }
 }
 
 /**
@@ -835,7 +865,7 @@ async function replaceLayerImages(entries) {
         type: image.type,
         width: image.width,
         height: image.height,
-        path: `assets/${assetId}.${image.type}`,
+        path: `assets/${assetId}.${image.type === 'lottie' ? 'json' : image.type === 'dotlottie' ? 'lottie' : image.type}`,
       };
       imageOverrides.set(assetId, { blob: image.file, url: URL.createObjectURL(image.file) });
       newAssetIds.push(assetId);
@@ -883,8 +913,22 @@ function releaseOverride(assetId) {
 }
 
 replaceOpenButton.addEventListener('click', openReplaceDialog);
+svgCodeCancel.addEventListener('click', () => svgCodeDialog.close());
+svgCodeApply.addEventListener('click', async () => {
+  if (svgCodeSlot < 0 || !svgCode.value.trim()) { svgCodeStatus.textContent = 'Cole um código SVG válido.'; return; }
+  svgCodeApply.disabled = true;
+  try {
+    const file = new File([svgCode.value], `camada_${svgCodeSlot + 1}.svg`, { type: 'image/svg+xml' });
+    const problem = await setSlotImage(svgCodeSlot, file);
+    svgCodeStatus.textContent = problem || '';
+    if (!problem) svgCodeDialog.close();
+  } finally { svgCodeApply.disabled = false; }
+});
 replaceCancelButton.addEventListener('click', () => replaceDialog.close());
-replaceDialog.addEventListener('close', clearReplaceSlots);
+replaceDialog.addEventListener('close', () => {
+  // A queued close event from an earlier import must not erase a newly opened dialog.
+  if (!replaceDialog.open) clearReplaceSlots();
+});
 replaceDialog.addEventListener('cancel', (e) => {
   if (isBusy) e.preventDefault(); // Esc must not close the dialog while images are loading
 });
@@ -906,6 +950,8 @@ replaceSlotFileInput.addEventListener('change', async () => {
 
 replaceClearButton.addEventListener('click', () => {
   for (const slot of slots) {
+    slot.importController?.abort();
+    slot.importController = null;
     if (slot.pending) {
       URL.revokeObjectURL(slot.pending.previewUrl);
       slot.pending = null;
@@ -929,7 +975,7 @@ replaceApplyButton.addEventListener('click', async () => {
   const entries = slots.flatMap((slot) => (
     slot.pending ? [{ layerId: slot.layerId, number: slot.number, image: slot.pending }] : []
   ));
-  if (entries.length === 0 || isBusy) return;
+  if (entries.length === 0 || isBusy || slots.some((slot) => slot.importController !== null)) return;
 
   setBusy(true);
   setDialogStatus('Carregando imagens…');
