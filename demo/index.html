@@ -81,6 +81,8 @@
     .btn:hover:not(:disabled) { border-color: #4ade80; }
     .btn.primary { background: #166534; border-color: #4ade80; }
     .btn:disabled { opacity: 0.5; cursor: default; }
+    #focus-cursor-toggle { width: 100%; margin-top: 6px; }
+    #focus-cursor-toggle[aria-pressed="true"] { background: #166534; border-color: #4ade80; }
     .layers-toolbar { display: flex; gap: 6px; margin: 8px 0 4px; }
     .layers-toolbar .btn { flex: 1; }
     #config-status { min-height: 14px; margin-top: 6px; font-size: 11px; color: #94a3b8; }
@@ -200,8 +202,8 @@
     </div>
     <div class="panel-body" id="hud-body">
       <div class="layers-toolbar">
-        <button type="button" class="btn" id="config-save" disabled>Salvar configuração</button>
-        <button type="button" class="btn" id="config-load" disabled>Carregar configuração</button>
+        <button type="button" class="btn" id="config-save" disabled>Salvar cena</button>
+        <button type="button" class="btn" id="config-load" disabled>Carregar cena</button>
       </div>
       <input type="file" id="config-file" accept=".json,application/json" hidden>
       <div class="hud-hint">Salva os ajustes e os nomes dos arquivos em JSON. Mantenha os arquivos na pasta demo/assets.</div>
@@ -215,6 +217,8 @@
         </div>
         <input type="range" id="focus-slider" min="0" max="100" step="0.1" value="50">
         <div class="hud-hint">Dica: Segure <b>Alt + Scroll do mouse</b> sobre o canvas</div>
+        <button type="button" class="btn" id="focus-cursor-toggle" aria-pressed="false">Foco no cursor: desligado</button>
+        <div class="hud-hint">Ligado: o foco vai para o objeto sob o cursor; o desfoque continua proporcional à profundidade das camadas.</div>
       </div>
 
       <div class="hud-row">

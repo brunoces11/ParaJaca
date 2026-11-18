@@ -14,6 +14,7 @@ import { AI_SUPPORTED_TYPES, createAiExpandPanel } from './ai-edit.js';
 /** @typedef {import('../src/core/scene/model.js').AssetType} AssetType */
 /** @typedef {import('../src/core/scene/model.js').Layer} Layer */
 /** @typedef {import('../src/core/scene/model.js').Rect} Rect */
+/** @typedef {import('../src/core/player.js').FocusTracking} FocusTracking */
 
 /**
  * @typedef {Object} DemoConfiguration
@@ -21,6 +22,7 @@ import { AI_SUPPORTED_TYPES, createAiExpandPanel } from './ai-edit.js';
  * @property {1 | 2} version
  * @property {number} focus
  * @property {number} depthOfField
+ * @property {FocusTracking} focusTracking
  * @property {number} intensityX
  * @property {number} intensityY
  * @property {'high' | 'mid' | 'low'} quality
@@ -53,6 +55,7 @@ const focusSlider = /** @type {HTMLInputElement} */ (document.getElementById('fo
 const dofSlider = /** @type {HTMLInputElement} */ (document.getElementById('dof-slider'));
 const dofVal = /** @type {HTMLElement} */ (document.getElementById('dof-val'));
 const focusVal = /** @type {HTMLElement} */ (document.getElementById('focus-val'));
+const focusCursorToggle = /** @type {HTMLButtonElement} */ (document.getElementById('focus-cursor-toggle'));
 const intensityXSlider = /** @type {HTMLInputElement} */ (document.getElementById('intensity-x-slider'));
 const intensityXVal = /** @type {HTMLElement} */ (document.getElementById('intensity-x-val'));
 const intensityYSlider = /** @type {HTMLInputElement} */ (document.getElementById('intensity-y-slider'));
@@ -171,6 +174,21 @@ function applyDepthOfField() {
 }
 dofSlider.addEventListener('input', applyDepthOfField);
 
+/** @type {FocusTracking} */
+let focusTracking = 'manual';
+
+/** @param {FocusTracking} mode */
+function applyFocusTracking(mode) {
+  focusTracking = mode;
+  const isCursor = mode === 'cursor';
+  focusCursorToggle.setAttribute('aria-pressed', String(isCursor));
+  focusCursorToggle.textContent = isCursor ? 'Foco no cursor: ligado' : 'Foco no cursor: desligado';
+  player.setFocusTracking(mode);
+}
+focusCursorToggle.addEventListener('click', () => {
+  applyFocusTracking(focusTracking === 'cursor' ? 'manual' : 'cursor');
+});
+
 // Wire Parallax Intensity Sliders (independent X and Y axes)
 function applyIntensity() {
   const intensityX = parseFloat(intensityXSlider.value);
@@ -264,6 +282,7 @@ function setBusy(busy) {
   configLoadButton.disabled = busy || !isSceneReady;
   addLayerButton.disabled = busy || !isSceneReady;
   focusSlider.disabled = busy;
+  focusCursorToggle.disabled = busy;
   dofSlider.disabled = busy;
   intensityXSlider.disabled = busy;
   intensityYSlider.disabled = busy;
@@ -573,6 +592,7 @@ function captureConfiguration(scene, variant) {
     version: 2,
     focus: Number(focusSlider.value),
     depthOfField: Number(dofSlider.value),
+    focusTracking,
     intensityX: Number(intensityXSlider.value),
     intensityY: Number(intensityYSlider.value),
     quality: /** @type {'high' | 'mid' | 'low'} */ (qualitySelect.value),
@@ -606,6 +626,11 @@ function parseConfiguration(value, variant) {
   if (typeof depthOfField !== 'number' || !Number.isInteger(depthOfField)
     || depthOfField < 0 || depthOfField > 100) {
     throw new Error('Intensidade de desfoque deve estar entre 0 e 100.');
+  }
+  // Files saved before cursor focus existed keep the slider-driven focus.
+  const focusTracking = data.focusTracking === undefined ? 'manual' : data.focusTracking;
+  if (focusTracking !== 'manual' && focusTracking !== 'cursor') {
+    throw new Error('Modo de foco inválido na configuração.');
   }
   if (typeof focus !== 'number' || !Number.isFinite(focus)
     || focus < variant.optics.focusRange[0] || focus > variant.optics.focusRange[1]
@@ -659,7 +684,7 @@ function parseConfiguration(value, variant) {
     }
     return { x, y, parallaxPercent, scalePercent };
   });
-  return { format: 'parajaca-config', version: /** @type {1 | 2} */ (data.version), focus, depthOfField, intensityX, intensityY, quality, layers };
+  return { format: 'parajaca-config', version: /** @type {1 | 2} */ (data.version), focus, depthOfField, focusTracking, intensityX, intensityY, quality, layers };
 }
 
 /**
@@ -708,6 +733,7 @@ async function applyConfiguration(configuration, variant) {
 
   dofSlider.value = String(configuration.depthOfField);
   applyDepthOfField();
+  applyFocusTracking(configuration.focusTracking);
   focusSlider.value = String(configuration.focus);
   player.setFocus(configuration.focus, { animate: false });
   intensityXSlider.value = String(configuration.intensityX);
@@ -769,6 +795,7 @@ async function restoreConfigurationAssets(configuration) {
   oldAssetIds.forEach(releaseOverride);
   dofSlider.value = String(configuration.depthOfField);
   applyDepthOfField();
+  applyFocusTracking(configuration.focusTracking);
   focusSlider.value = String(configuration.focus);
   player.setFocus(configuration.focus, { animate: false });
   intensityXSlider.value = String(configuration.intensityX);

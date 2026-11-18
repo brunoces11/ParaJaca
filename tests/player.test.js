@@ -39,12 +39,27 @@ function createElement() {
   });
 }
 
-function createHarness() {
+/** @typedef {(u: number, v: number) => number} AlphaAt alpha 0–255 at 0–1 image coordinates */
+
+/**
+ * @param {{ alphaByLoad?: AlphaAt[] }} [options] alpha of each decoded bitmap, in load order
+ *   (back to front); missing entries are fully opaque.
+ */
+function createHarness({ alphaByLoad = [] } = {}) {
   const windowTarget = Object.assign(new EventTarget(), { devicePixelRatio: 1 });
+  /** @type {ReturnType<typeof createElement> | null} */
+  let canvasElement = null;
   const documentTarget = Object.assign(new EventTarget(), {
-    createElement, documentElement: new EventTarget(), baseURI: 'http://localhost/demo/',
+    /** @param {string} tag */
+    createElement(tag) {
+      const element = createElement();
+      if (tag === 'canvas') canvasElement = element;
+      return element;
+    },
+    documentElement: new EventTarget(), baseURI: 'http://localhost/demo/',
     visibilityState: 'visible',
   });
+  let loadIndex = 0;
   /** @type {IntersectionObserverCallback | null} */
   let intersectionCallback = null;
   /** @type {Map<number, FrameRequestCallback>} */
@@ -86,7 +101,31 @@ function createHarness() {
       /** @type {Blob} */ _blob, _x = 0, _y = 0, _width = 1, _height = 1,
       options = { resizeWidth: 1, resizeHeight: 1 },
     ) {
-      return { width: options.resizeWidth, height: options.resizeHeight, close() {} };
+      const alphaAt = alphaByLoad[loadIndex++] ?? (() => 255);
+      return { width: options.resizeWidth, height: options.resizeHeight, alphaAt, close() {} };
+    },
+    // Rasterizes the fake bitmap's alphaAt into the mask read by computeAlphaMask.
+    OffscreenCanvas: class {
+      constructor() {
+        /** @type {AlphaAt} */
+        this.alphaAt = () => 255;
+      }
+      getContext() {
+        return {
+          /** @param {{ alphaAt: AlphaAt }} source */
+          drawImage: (source) => { this.alphaAt = source.alphaAt; },
+          /** @param {number} _x @param {number} _y @param {number} width @param {number} height */
+          getImageData: (_x, _y, width, height) => {
+            const data = new Uint8ClampedArray(width * height * 4);
+            for (let y = 0; y < height; y++) {
+              for (let x = 0; x < width; x++) {
+                data[(y * width + x) * 4 + 3] = this.alphaAt((x + 0.5) / width, (y + 0.5) / height);
+              }
+            }
+            return { data };
+          },
+        };
+      }
     },
     __parajacaTestRenderer: renderer,
   };
@@ -114,10 +153,19 @@ function createHarness() {
       }
       assert.equal(callbacks.size, 0, 'animation must converge');
     },
-    /** @param {{ x: number, y: number }} position */
-    pointAt({ x, y }) {
+    /** Runs only the frames already requested. */
+    step() {
+      const pending = [...callbacks.values()];
+      callbacks.clear();
+      timestampMs += 16;
+      pending.forEach((callback) => callback(timestampMs));
+    },
+    /** @param {{ x: number, y: number, isOverCanvas?: boolean }} position */
+    pointAt({ x, y, isOverCanvas = false }) {
       const event = new Event('pointermove');
       Object.assign(event, { clientX: x, clientY: y });
+      // The pointer listener is on the window; target tells whether the scene is under the pointer.
+      if (isOverCanvas) Object.defineProperty(event, 'target', { value: canvasElement });
       windowTarget.dispatchEvent(event);
     },
     getFrame() { assert.ok(drawn); return drawn; },
@@ -335,5 +383,52 @@ test('layer scale preserves aspect ratio, anchor, and authored size through relo
     assert.equal(scaled.placement.height, 1080 * scalePercent / 100);
     assert.deepEqual([scaled.placement.x, scaled.placement.y], [0, 0]);
   }
+  assert.deepEqual(h.errors, []);
+});
+
+test('cursor tracking focuses the front-most silhouette under the pointer after the dwell time', async (t) => {
+  // Load order is back to front: opaque background, two transparent layers, front opaque on its left half.
+  const h = createHarness({ alphaByLoad: [() => 255, () => 0, () => 0, (u) => (u < 0.5 ? 255 : 0)] });
+  t.after(h.cleanup);
+  await h.player.load(createScene());
+  h.player.setIntensity(0, 0);
+  /** @type {number[]} */
+  const focusTargets = [];
+  h.player.on('focus-change', (payload) => focusTargets.push(payload.d));
+  h.flush();
+
+  h.pointAt({ x: 270, y: 540, isOverCanvas: true });
+  h.flush();
+  assert.deepEqual(focusTargets, [], 'manual tracking ignores the cursor');
+
+  h.player.setFocusTracking('cursor');
+  h.step();
+  assert.deepEqual(focusTargets, [], 'focus waits for the dwell time');
+  h.flush();
+  assert.deepEqual(focusTargets, [10]);
+  const front = h.getFrame();
+  assert.ok(front.lods[3] < front.lods[0], 'the front layer is sharper than the background');
+
+  h.pointAt({ x: 800, y: 540, isOverCanvas: true });
+  h.flush();
+  assert.deepEqual(focusTargets, [10, 90], 'transparent front pixels fall through to the background');
+  const back = h.getFrame();
+  assert.ok(back.lods[0] < back.lods[3], 'the background is sharper than the front layer');
+
+  h.pointAt({ x: 270, y: 540 });
+  h.flush();
+  assert.deepEqual(focusTargets, [10, 90], 'a pointer over an overlaid panel keeps the focus');
+
+  h.pointAt({ x: 270, y: 540, isOverCanvas: true });
+  h.step();
+  h.step();
+  h.pointAt({ x: 800, y: 540, isOverCanvas: true });
+  h.flush();
+  assert.deepEqual(focusTargets, [10, 90], 'a brief pass over another layer does not refocus');
+
+  h.player.setFocusTracking('manual');
+  h.pointAt({ x: 270, y: 540, isOverCanvas: true });
+  h.flush();
+  assert.deepEqual(focusTargets, [10, 90]);
   assert.deepEqual(h.errors, []);
 });

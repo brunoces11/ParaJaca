@@ -88,6 +88,7 @@ test('configuration restores saved assets and accepts older configuration files'
   function emit(event, payload) { events.get(event)?.forEach((handler) => handler(payload)); }
   let focus = 50;
   let depthOfField = 1;
+  let focusTracking = 'manual';
   let intensityX = 0;
   let intensityY = 0;
   let quality = 'high';
@@ -103,6 +104,8 @@ test('configuration restores saved assets and accepts older configuration files'
     setFocus(value) { focus = value; emit('focus-change', { d: value }); },
     /** @param {number} value */
     setDepthOfFieldStrength(value) { depthOfField = value; },
+    /** @param {string} value */
+    setFocusTracking(value) { focusTracking = value; },
     /** @param {number} x @param {number} y */
     setIntensity(x, y) { intensityX = x; intensityY = y; },
     /** @param {string} value */
@@ -206,6 +209,9 @@ test('configuration restores saved assets and accepts older configuration files'
   input(child(child(row, 1), 2), '-1250');
   input(child(child(row, 2), 2), '2050');
   input(child(child(row, 4), 1), '200');
+  control('focus-cursor-toggle').click();
+  assert.equal(focusTracking, 'cursor');
+  assert.equal(control('focus-cursor-toggle').textContent, 'Foco no cursor: ligado');
   chosenName = null;
   control('config-save').click();
   assert.equal(download, null);
@@ -218,10 +224,11 @@ test('configuration restores saved assets and accepts older configuration files'
   assert.ok(blob);
   const savedText = await blob.text();
   URL.revokeObjectURL(savedDownload.href);
-  const saved = /** @type {{ version: number, focus: number, intensityX: number, intensityY: number, quality: string, depthOfField: number, layers: Array<{ x: number, y: number, parallaxPercent: number | null, scalePercent: number, asset: import('../src/core/scene/model.js').Asset }> }} */ (JSON.parse(savedText));
+  const saved = /** @type {{ version: number, focus: number, intensityX: number, intensityY: number, quality: string, depthOfField: number, focusTracking?: string, layers: Array<{ x: number, y: number, parallaxPercent: number | null, scalePercent: number, asset: import('../src/core/scene/model.js').Asset }> }} */ (JSON.parse(savedText));
   assert.deepEqual(saved.layers[1], { x: -1250, y: 2050, parallaxPercent: 66.6, scalePercent: 200, asset: originalAssets[1] });
   assert.equal(saved.version, 2);
   assert.equal(saved.depthOfField, 35);
+  assert.equal(saved.focusTracking, 'cursor');
   assert.deepEqual(saved.layers.map((layer) => layer.asset.path), originalAssets.map((asset) => asset.path));
   assert.equal(saved.layers[0].parallaxPercent, null);
   assert.deepEqual([saved.focus, saved.intensityX, saved.intensityY, saved.quality],
@@ -234,11 +241,14 @@ test('configuration restores saved assets and accepts older configuration files'
   input(child(child(row, 1), 2), '5');
   input(child(child(row, 3), 2), '2');
   const fileInput = control('config-file');
-  const legacy = { ...saved, version: 1, layers: saved.layers.map(({ x, y, parallaxPercent, scalePercent }) => ({ x, y, parallaxPercent, scalePercent })) };
+  // Older files have no focusTracking: they fall back to the slider-driven focus.
+  const legacy = { ...saved, version: 1, focusTracking: undefined, layers: saved.layers.map(({ x, y, parallaxPercent, scalePercent }) => ({ x, y, parallaxPercent, scalePercent })) };
   fileInput.files = [new File([JSON.stringify(legacy)], 'space.json', { type: 'application/json' })];
   fileInput.dispatchEvent(new Event('change'));
   await waitFor(() => control('config-status').textContent.startsWith('Configuração carregada'));
   assert.deepEqual([focus, intensityX, intensityY, quality, depthOfField], [73.4, 300, 40, 'low', 0.35]);
+  assert.equal(focusTracking, 'manual');
+  assert.equal(control('focus-cursor-toggle').textContent, 'Foco no cursor: desligado');
   assert.deepEqual(scene.assets, originalAssets);
   assert.deepEqual(scene.variants[0].layers[1].placement,
     { x: -1250, y: 2050, width: 3840, height: 2160 });
@@ -255,6 +265,12 @@ test('configuration restores saved assets and accepts older configuration files'
   assert.match(control('config-status').textContent, /entre 4 e 11 camadas/);
   assert.deepEqual(scene, snapshot);
   assert.deepEqual([focus, intensityX, intensityY, quality, depthOfField], [73.4, 300, 40, 'low', 0.35]);
+
+  fileInput.files = [new File([JSON.stringify({ ...legacy, focusTracking: 'mouse' })], 'mode.json')];
+  fileInput.dispatchEvent(new Event('change'));
+  await waitFor(() => control('config-status').textContent.includes('Modo de foco inválido'));
+  assert.deepEqual(scene, snapshot);
+  assert.equal(focusTracking, 'manual');
 
   fileInput.files = [new File(['not JSON'], 'invalid.json')];
   fileInput.dispatchEvent(new Event('change'));
@@ -273,6 +289,7 @@ test('configuration restores saved assets and accepts older configuration files'
   fileInput.files = [new File([savedText], 'scene.json')];
   fileInput.dispatchEvent(new Event('change'));
   await waitFor(() => control('config-status').textContent.includes('arquivos das camadas carregados'));
+  assert.equal(focusTracking, 'cursor');
   assert.deepEqual(scene.assets.map((asset) => asset.path), originalAssets.map((asset) => asset.path));
   assert.deepEqual(scene.variants[0].layers[1].placement, { x: -1250, y: 2050, width: 3840, height: 2160 });
 

@@ -28,12 +28,21 @@ import { computeRequirements } from './quality/requirements.js';
 import { analyzeSource, decodeSource } from './sources/image-source.js';
 import { createRenderer, createFrameState } from './render/renderer.js';
 import { createAnimatedSource } from './sources/media-source.js';
+import { computeAlphaMask, sampleMask } from './sources/mask.js';
 
 export const DIRTY_FRAME = 1;
 export const DIRTY_ORDER = 2;
 export const DIRTY_LAYOUT = 4;
 export const DIRTY_REQUIREMENTS = 8;
 export const WHEEL_FOCUS_STEP = 2;
+export const CLICK_TOLERANCE_CSS = 6; // calibrate
+// Time the cursor must stay over a layer before the focus moves to it (avoids flicker on edges).
+export const CURSOR_FOCUS_DWELL_MS = 120; // calibrate
+
+/**
+ * Who drives the focus: the slider/API ('manual') or the layer under the cursor ('cursor').
+ * @typedef {'manual' | 'cursor'} FocusTracking
+ */
 
 /**
  * @typedef {import('./scene/model.js').Scene} Scene
@@ -93,6 +102,7 @@ export const WHEEL_FOCUS_STEP = 2;
  * @property {(id: string) => Promise<void>} setVariant
  * @property {(d: number, opts?: { animate?: boolean }) => void} setFocus
  * @property {(strength: number) => void} setDepthOfFieldStrength
+ * @property {(mode: FocusTracking) => void} setFocusTracking
  * @property {(preset: QualityPresetName) => void} setQuality
  * @property {(intensity: number, intensityY?: number) => void} setIntensity
  * @property {() => void} resize
@@ -283,10 +293,22 @@ export function createPlayer(container, options = {}) {
     layerRequirements: new Map(),
     /** @type {Map<string, { x: number, y: number, width: number, height: number }>} */
     layerRectComp: new Map(),
+    /** @type {Map<string, import('./sources/image-source.js').AlphaMask>} */
+    layerMasks: new Map(),
     dirtyFlags: 0,
     focusCurrent: 50,
     focusTarget: 50,
     depthOfFieldStrength: 1,
+    /** @type {FocusTracking} */
+    focusTracking: 'manual',
+    // Last pointer position over the canvas, 0–1 per axis (top-left origin).
+    cursorU: 0,
+    cursorV: 0,
+    canvasWidthCss: 0,
+    isCursorOverCanvas: false,
+    // Layer index under the cursor waiting for CURSOR_FOCUS_DWELL_MS (-1 = none).
+    cursorCandidateIdx: -1,
+    cursorCandidateSinceMs: 0,
     inputTargetX: 0,
     inputTargetY: 0,
     inputCurrentX: 0,
@@ -351,6 +373,9 @@ export function createPlayer(container, options = {}) {
         }
       }
     }
+
+    // Cursor focus reads the rects of the last drawn frame (what is on screen) before smoothing.
+    const isCursorFocusPending = updateCursorFocus(timestamp);
 
     // Smooth inputs
     const inputK = computeInputK(motion.smoothing);
@@ -469,9 +494,72 @@ export function createPlayer(container, options = {}) {
       runtime.focusCurrent = runtime.focusTarget;
       // Loop halts until triggered by new input or command
     }
-    if (!converged || (animatedSources.length > 0 && !animationsPaused())) {
+    if (!converged || isCursorFocusPending || (animatedSources.length > 0 && !animationsPaused())) {
       requestFrame();
     }
+  }
+
+  /**
+   * Finds the front-most non-'sharp' layer whose silhouette is under the cursor, using the rects
+   * of the last drawn frame (parallax, scale and framing included). Allocation-free (hot path).
+   * @returns {number} layer index in variant.layers, or -1
+   */
+  function hitTestCursorLayer() {
+    const variant = runtime.variant;
+    if (!variant || runtime.canvasWidthCss <= 0) return -1;
+    const cursorXRender = runtime.cursorU * canvas.width;
+    const cursorYRender = runtime.cursorV * canvas.height;
+    const renderPxPerCssPx = canvas.width / runtime.canvasWidthCss;
+    const toleranceRender = CLICK_TOLERANCE_CSS * renderPxPerCssPx;
+    const count = Math.min(frameState.layerCount, runtime.drawOrder.length);
+    for (let i = count - 1; i >= 0; i--) {
+      const layerIdx = runtime.drawOrder[i];
+      const layer = variant.layers[layerIdx];
+      if (layer.focusMode === 'sharp') continue;
+      const mask = runtime.layerMasks.get(layer.id);
+      const req = runtime.layerRequirements.get(layer.id);
+      if (!mask || !req) continue;
+      // The quad includes padding; the mask covers only the content inside it.
+      const rIdx = i * 4;
+      const quadWidthRender = frameState.rects[rIdx + 2];
+      const quadHeightRender = frameState.rects[rIdx + 3];
+      const contentWidthRender = quadWidthRender * req.contentSizeTex.width / req.textureSize.width;
+      const contentHeightRender = quadHeightRender * req.contentSizeTex.height / req.textureSize.height;
+      if (contentWidthRender <= 0 || contentHeightRender <= 0) continue;
+      const contentXRender = frameState.rects[rIdx] + quadWidthRender * req.paddingTex.left / req.textureSize.width;
+      const contentYRender = frameState.rects[rIdx + 1] + quadHeightRender * req.paddingTex.top / req.textureSize.height;
+      const u = (cursorXRender - contentXRender) / contentWidthRender;
+      const v = (cursorYRender - contentYRender) / contentHeightRender;
+      const radiusCells = toleranceRender * mask.width / contentWidthRender;
+      if (sampleMask(mask, u, v, radiusCells)) return layerIdx;
+    }
+    return -1;
+  }
+
+  /**
+   * In 'cursor' tracking, moves the focus target to the depth of the layer under the cursor once
+   * it stayed there for CURSOR_FOCUS_DWELL_MS. Blur stays proportional to each layer's depth.
+   * @param {number} timestamp
+   * @returns {boolean} true while a candidate is waiting (keeps the loop running)
+   */
+  function updateCursorFocus(timestamp) {
+    if (runtime.focusTracking !== 'cursor' || !runtime.isCursorOverCanvas
+      || !runtime.variant || !runtime.resolvedDepths) {
+      runtime.cursorCandidateIdx = -1;
+      return false;
+    }
+    const hitIdx = hitTestCursorLayer();
+    if (hitIdx !== runtime.cursorCandidateIdx) {
+      runtime.cursorCandidateIdx = hitIdx;
+      runtime.cursorCandidateSinceMs = timestamp;
+    }
+    if (hitIdx < 0) return false;
+    const range = runtime.variant.optics.focusRange;
+    const depth = Math.min(Math.max(runtime.resolvedDepths[hitIdx], range[0]), range[1]);
+    if (depth === runtime.focusTarget) return false;
+    if (timestamp - runtime.cursorCandidateSinceMs < CURSOR_FOCUS_DWELL_MS) return true;
+    setFocus(depth);
+    return false;
   }
 
   function requestFrame() {
@@ -496,11 +584,20 @@ export function createPlayer(container, options = {}) {
     runtime.inputTargetX = halfW > 0 ? Math.min(Math.max((e.clientX - centerX) / halfW, -1), 1) : 0;
     runtime.inputTargetY = halfH > 0 ? Math.min(Math.max((e.clientY - centerY) / halfH, -1), 1) : 0;
 
+    // Cursor focus only follows the pointer directly over the scene, not over overlaid panels.
+    runtime.isCursorOverCanvas = e.target === canvas && rect.width > 0 && rect.height > 0;
+    if (runtime.isCursorOverCanvas) {
+      runtime.cursorU = (e.clientX - rect.left) / rect.width;
+      runtime.cursorV = (e.clientY - rect.top) / rect.height;
+      runtime.canvasWidthCss = rect.width;
+    }
+
     runtime.dirtyFlags |= DIRTY_FRAME;
     requestFrame();
   }
 
   function onPointerLeave() {
+    runtime.isCursorOverCanvas = false;
     runtime.inputTargetX = 0;
     runtime.inputTargetY = 0;
     runtime.dirtyFlags |= DIRTY_FRAME;
@@ -603,6 +700,19 @@ export function createPlayer(container, options = {}) {
   function setDepthOfFieldStrength(strength) {
     if (!Number.isFinite(strength)) return;
     runtime.depthOfFieldStrength = Math.max(0, Math.min(1, strength));
+    runtime.dirtyFlags |= DIRTY_FRAME;
+    requestFrame();
+  }
+
+  /**
+   * Chooses who drives the focus: setFocus callers ('manual') or the layer under the cursor
+   * ('cursor'). setFocus keeps working in both modes; the next cursor hit takes over again.
+   * @param {FocusTracking} mode
+   */
+  function setFocusTracking(mode) {
+    if (mode !== 'manual' && mode !== 'cursor') return;
+    runtime.focusTracking = mode;
+    runtime.cursorCandidateIdx = -1;
     runtime.dirtyFlags |= DIRTY_FRAME;
     requestFrame();
   }
@@ -749,6 +859,10 @@ export function createPlayer(container, options = {}) {
     }
     runtime.layerRequirements.clear();
     runtime.layerRectComp.clear();
+    runtime.layerMasks.clear();
+    // Old rects belong to the previous layers; cursor hit tests wait for the first new frame.
+    frameState.layerCount = 0;
+    runtime.cursorCandidateIdx = -1;
 
     try {
       signal.throwIfAborted();
@@ -874,6 +988,18 @@ export function createPlayer(container, options = {}) {
           return;
         }
 
+        // Silhouette for cursor focus, read before prepareLayer closes the bitmap. Animated
+        // layers keep the silhouette of their first frame.
+        /** @type {import('./sources/image-source.js').AlphaMask} */
+        let alphaMask;
+        try {
+          alphaMask = computeAlphaMask(bitmap, bitmap.width, bitmap.height);
+        } catch (error) {
+          bitmap.close();
+          animated?.dispose();
+          throw error;
+        }
+
         try { await renderer.prepareLayer(
           layer.id,
           {
@@ -903,6 +1029,7 @@ export function createPlayer(container, options = {}) {
 
         runtime.layerRequirements.set(layer.id, req);
         runtime.layerRectComp.set(layer.id, rectComp);
+        runtime.layerMasks.set(layer.id, alphaMask);
       }
 
       // Final layout calculation
@@ -978,6 +1105,7 @@ export function createPlayer(container, options = {}) {
     async setVariant() {},
     setFocus,
     setDepthOfFieldStrength,
+    setFocusTracking,
     setQuality,
     setIntensity,
     resize,
