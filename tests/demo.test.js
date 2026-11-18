@@ -63,7 +63,7 @@ async function waitFor(condition) {
   assert.ok(condition(), 'asynchronous UI action did not complete');
 }
 
-test('configuration download and import restore all controls without replacing images', async (t) => {
+test('configuration restores saved assets and accepts older configuration files', async (t) => {
   const html = readFileSync(new URL('../demo/index.html', import.meta.url), 'utf8');
   const controls = new Map([...html.matchAll(/\bid="([^"]+)"/g)]
     .map((match) => [match[1], createElement()]));
@@ -91,7 +91,11 @@ test('configuration download and import restore all controls without replacing i
   let quality = 'high';
   let failLayer = '';
   const fakePlayer = {
-    load() { queueMicrotask(() => emit('ready', {})); return Promise.resolve(); },
+    /** @param {string | Scene} value */
+    load(value) {
+      if (typeof value === 'object') scene = structuredClone(value);
+      queueMicrotask(() => emit('ready', {})); return Promise.resolve();
+    },
     getScene() { return structuredClone(scene); },
     /** @param {number} value */
     setFocus(value) { focus = value; emit('focus-change', { d: value }); },
@@ -140,6 +144,7 @@ test('configuration download and import restore all controls without replacing i
     window: new EventTarget(), document: documentTarget,
     setInterval() { return 0; },
     __parajacaDemoTestPlayer: fakePlayer,
+    fetch: async () => ({ ok: true, status: 200 }),
   };
   const originals = Object.keys(globals).map((name) => ({
     name, descriptor: Object.getOwnPropertyDescriptor(globalThis, name),
@@ -185,8 +190,10 @@ test('configuration download and import restore all controls without replacing i
   assert.ok(blob);
   const savedText = await blob.text();
   URL.revokeObjectURL(savedDownload.href);
-  const saved = JSON.parse(savedText);
-  assert.deepEqual(saved.layers[1], { x: -1250, y: 2050, parallaxPercent: 66.6 });
+  const saved = /** @type {{ version: number, focus: number, intensityX: number, intensityY: number, quality: string, layers: Array<{ x: number, y: number, parallaxPercent: number | null, asset: import('../src/core/scene/model.js').Asset }> }} */ (JSON.parse(savedText));
+  assert.deepEqual(saved.layers[1], { x: -1250, y: 2050, parallaxPercent: 66.6, asset: originalAssets[1] });
+  assert.equal(saved.version, 2);
+  assert.deepEqual(saved.layers.map((layer) => layer.asset.path), originalAssets.map((asset) => asset.path));
   assert.equal(saved.layers[0].parallaxPercent, null);
   assert.deepEqual([saved.focus, saved.intensityX, saved.intensityY, saved.quality],
     [73.4, 300, 40, 'low']);
@@ -197,7 +204,8 @@ test('configuration download and import restore all controls without replacing i
   input(child(child(row, 1), 2), '5');
   input(child(child(row, 3), 2), '2');
   const fileInput = control('config-file');
-  fileInput.files = [new File([savedText], 'space.json', { type: 'application/json' })];
+  const legacy = { ...saved, version: 1, layers: saved.layers.map(({ x, y, parallaxPercent }) => ({ x, y, parallaxPercent })) };
+  fileInput.files = [new File([JSON.stringify(legacy)], 'space.json', { type: 'application/json' })];
   fileInput.dispatchEvent(new Event('change'));
   await waitFor(() => control('config-status').textContent.startsWith('Configuração carregada'));
   assert.deepEqual([focus, intensityX, intensityY, quality], [73.4, 300, 40, 'low']);
@@ -223,7 +231,7 @@ test('configuration download and import restore all controls without replacing i
   await waitFor(() => control('config-status').textContent.includes('JSON válido'));
   assert.deepEqual(scene, snapshot);
 
-  const failing = structuredClone(saved);
+  const failing = structuredClone(legacy);
   failing.layers[0].x = 999;
   failLayer = scene.variants[0].layers[1].id;
   fileInput.files = [new File([JSON.stringify(failing)], 'failure.json')];
@@ -231,4 +239,17 @@ test('configuration download and import restore all controls without replacing i
   await waitFor(() => control('config-status').textContent.includes('Simulated edit failure'));
   assert.deepEqual(scene, snapshot);
   assert.deepEqual([focus, intensityX, intensityY, quality], [73.4, 300, 40, 'low']);
+
+  fileInput.files = [new File([savedText], 'scene.json')];
+  fileInput.dispatchEvent(new Event('change'));
+  await waitFor(() => control('config-status').textContent.includes('arquivos das camadas carregados'));
+  assert.deepEqual(scene.assets.map((asset) => asset.path), originalAssets.map((asset) => asset.path));
+  assert.deepEqual(scene.variants[0].layers[1].placement, { x: -1250, y: 2050, width: 1920, height: 1080 });
+
+  const restored = structuredClone(scene);
+  Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: async () => ({ ok: false, status: 404 }) });
+  fileInput.files = [new File([savedText], 'missing.json')];
+  fileInput.dispatchEvent(new Event('change'));
+  await waitFor(() => control('config-status').textContent.includes('HTTP 404'));
+  assert.deepEqual(scene, restored);
 });

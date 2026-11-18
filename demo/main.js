@@ -15,12 +15,12 @@ import { inspectMediaFile } from '../src/core/sources/media-source.js';
 /**
  * @typedef {Object} DemoConfiguration
  * @property {'parajaca-config'} format
- * @property {1} version
+ * @property {1 | 2} version
  * @property {number} focus
  * @property {number} intensityX
  * @property {number} intensityY
  * @property {'high' | 'mid' | 'low'} quality
- * @property {Array<{ x: number, y: number, parallaxPercent: number | null }>} layers
+ * @property {Array<{ x: number, y: number, parallaxPercent: number | null, asset?: Asset }>} layers
  */
 
 /**
@@ -454,23 +454,27 @@ function setConfigStatus(message, isError = false) {
 }
 
 /**
- * Saves controls and layer parameters by their displayed order, without image data.
+ * Saves controls, layer parameters and the asset referenced by each layer.
+ * @param {Scene} scene
  * @param {Variant} variant
  * @returns {DemoConfiguration}
  */
-function captureConfiguration(variant) {
+function captureConfiguration(scene, variant) {
   return {
     format: 'parajaca-config',
-    version: 1,
+    version: 2,
     focus: Number(focusSlider.value),
     intensityX: Number(intensityXSlider.value),
     intensityY: Number(intensityYSlider.value),
     quality: /** @type {'high' | 'mid' | 'low'} */ (qualitySelect.value),
-    layers: sortedLayers(variant).map((layer) => ({
-      x: layer.placement.x,
-      y: layer.placement.y,
-      parallaxPercent: layer.parallaxPercent ?? null,
-    })),
+    layers: sortedLayers(variant).map((layer) => {
+      const asset = scene.assets.find((item) => item.id === layer.assetId);
+      if (!asset) throw new Error('Arquivo da camada não encontrado na cena.');
+      const path = imageOverrides.has(asset.id)
+        ? `assets/${encodeURIComponent(asset.name).replace(/\.\./g, '%2E%2E')}` : asset.path;
+      return { x: layer.placement.x, y: layer.placement.y,
+        parallaxPercent: layer.parallaxPercent ?? null, asset: { ...asset, path } };
+    }),
   };
 }
 
@@ -485,7 +489,7 @@ function parseConfiguration(value, variant) {
     throw new Error('Arquivo de configuração inválido.');
   }
   const data = /** @type {Record<string, unknown>} */ (value);
-  if (data.format !== 'parajaca-config' || data.version !== 1) {
+  if (data.format !== 'parajaca-config' || data.version !== 1 && data.version !== 2) {
     throw new Error('Formato ou versão de configuração não reconhecido.');
   }
   const { focus, intensityX, intensityY, quality } = data;
@@ -518,9 +522,25 @@ function parseConfiguration(value, variant) {
         || !Number.isFinite(parallaxPercent) || parallaxPercent < 0 || parallaxPercent > 100))) {
       throw new Error(`Parâmetros inválidos na camada ${index + 1}.`);
     }
+    if (data.version === 2) {
+      const asset = layer.asset;
+      if (!asset || typeof asset !== 'object' || Array.isArray(asset)) {
+        throw new Error(`Arquivo inválido na camada ${index + 1}.`);
+      }
+      const item = /** @type {Record<string, unknown>} */ (asset);
+      if (typeof item.id !== 'string' || !item.id || typeof item.name !== 'string'
+        || !['png', 'webp', 'jpg', 'svg', 'lottie', 'dotlottie'].includes(String(item.type))
+        || typeof item.width !== 'number' || !Number.isFinite(item.width) || item.width <= 0
+        || typeof item.height !== 'number' || !Number.isFinite(item.height) || item.height <= 0
+        || typeof item.path !== 'string' || !/^assets\/[^/\\?#]+$/.test(item.path)
+        || item.path.includes('..') || /%2f|%5c/i.test(item.path)) {
+        throw new Error(`Arquivo inválido na camada ${index + 1}.`);
+      }
+      return { x, y, parallaxPercent, asset: /** @type {Asset} */ (/** @type {unknown} */ (item)) };
+    }
     return { x, y, parallaxPercent };
   });
-  return { format: 'parajaca-config', version: 1, focus, intensityX, intensityY, quality, layers };
+  return { format: 'parajaca-config', version: /** @type {1 | 2} */ (data.version), focus, intensityX, intensityY, quality, layers };
 }
 
 /**
@@ -576,14 +596,71 @@ async function applyConfiguration(configuration, variant) {
   buildLayerRows(player.getScene());
 }
 
+/**
+ * Restores asset references and layer positions together, rolling back on load failure.
+ * @param {DemoConfiguration} configuration
+ * @returns {Promise<void>}
+ */
+async function restoreConfigurationAssets(configuration) {
+  const previousScene = player.getScene();
+  const scene = player.getScene();
+  const variant = getDefaultVariant(scene);
+  if (!variant) throw new Error('Cena sem variante disponível.');
+  const layers = sortedLayers(variant);
+  const oldAssetIds = layers.map((layer) => layer.assetId);
+  const savedAssets = configuration.layers.map((entry) => {
+    if (!entry.asset) throw new Error('A configuração não contém todos os arquivos.');
+    return entry.asset;
+  });
+  for (const asset of savedAssets) {
+    const response = await fetch(new URL(asset.path, SCENE_URL));
+    if (!response.ok) throw new Error(`Arquivo não encontrado: ${asset.path} (HTTP ${response.status}).`);
+  }
+  scene.assets = scene.assets.filter((asset) => !oldAssetIds.includes(asset.id));
+  for (let index = 0; index < layers.length; index++) {
+    const saved = configuration.layers[index];
+    const asset = { ...savedAssets[index], id: crypto.randomUUID() };
+    scene.assets.push(asset);
+    layers[index].assetId = asset.id;
+    layers[index].placement = { x: saved.x, y: saved.y, width: asset.width, height: asset.height };
+    layers[index].parallaxPercent = saved.parallaxPercent;
+  }
+  let ready = false;
+  let message = '';
+  const stopReady = player.on('ready', () => { ready = true; });
+  const stopError = player.on('error', (payload) => { message = String(payload.message); });
+  try {
+    await player.load(scene);
+  } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
+  } finally {
+    stopReady();
+    stopError();
+  }
+  if (!ready) {
+    await player.load(previousScene);
+    throw new Error(`Falha ao carregar os arquivos: ${message || 'cena não carregada'}.`);
+  }
+  oldAssetIds.forEach(releaseOverride);
+  focusSlider.value = String(configuration.focus);
+  player.setFocus(configuration.focus, { animate: false });
+  intensityXSlider.value = String(configuration.intensityX);
+  intensityYSlider.value = String(configuration.intensityY);
+  applyIntensity();
+  qualitySelect.value = configuration.quality;
+  player.setQuality(configuration.quality);
+  buildLayerRows(player.getScene());
+}
+
 configSaveButton.addEventListener('click', () => {
   if (isBusy || !isSceneReady) return;
-  const variant = getDefaultVariant(player.getScene());
+  const scene = player.getScene();
+  const variant = getDefaultVariant(scene);
   if (!variant) {
     setConfigStatus('Cena sem variante disponível.', true);
     return;
   }
-  const json = JSON.stringify(captureConfiguration(variant), null, 2);
+  const json = JSON.stringify(captureConfiguration(scene, variant), null, 2);
   const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
   const link = document.createElement('a');
   link.href = url;
@@ -609,8 +686,13 @@ configFileInput.addEventListener('change', async () => {
     const variant = getDefaultVariant(player.getScene());
     if (!variant) throw new Error('Cena sem variante disponível.');
     const configuration = parseConfiguration(data, variant);
-    await applyConfiguration(configuration, variant);
-    setConfigStatus('Configuração carregada. As imagens atuais foram mantidas.');
+    if (configuration.version === 2) {
+      await restoreConfigurationAssets(configuration);
+      setConfigStatus('Configuração e arquivos das camadas carregados.');
+    } else {
+      await applyConfiguration(configuration, variant);
+      setConfigStatus('Configuração carregada. As imagens atuais foram mantidas.');
+    }
   } catch (error) {
     const message = error instanceof SyntaxError
       ? 'O arquivo não contém um JSON válido.'
