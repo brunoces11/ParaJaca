@@ -291,11 +291,18 @@ export function validateScene(input) {
             }
           }
 
-          // Geometry uses native asset pixels; X/Y remain author-controlled.
+          let scalePercent = 100;
+          if (rawLayer.scalePercent !== undefined) {
+            if (typeof rawLayer.scalePercent !== 'number' || !Number.isFinite(rawLayer.scalePercent)
+              || rawLayer.scalePercent < 5 || rawLayer.scalePercent > 500) {
+              errors.push(`${lPrefix}.scalePercent: out of range (5-500)`);
+            } else scalePercent = rawLayer.scalePercent;
+          }
+          // A new asset starts at native dimensions; authored scale is explicit.
           const asset = cleanAssets.find((a) => a.id === assetId);
           if (asset) {
-            placement.width = asset.width;
-            placement.height = asset.height;
+            placement.width = asset.width * scalePercent / 100;
+            placement.height = asset.height * scalePercent / 100;
           }
 
           let parallaxPercent = null;
@@ -351,6 +358,7 @@ export function validateScene(input) {
             id: layerId,
             assetId,
             placement,
+            scalePercent,
             parallaxPercent,
             depth,
             focusMode,

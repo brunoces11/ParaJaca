@@ -51,6 +51,7 @@
  * @property {string} assetId
  * @property {Rect} placement
  * @property {number | null} depth
+ * @property {number} [scalePercent] proportional scale relative to the original asset
  * @property {number | null} [parallaxPercent] 0-100; null or absent = evenly spaced by order
  * @property {FocusMode} focusMode
  * @property {number} fixedBlur

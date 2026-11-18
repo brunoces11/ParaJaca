@@ -2,7 +2,9 @@
 // Connects player instance to UI controls, per-axis intensity, layer panel/dialog, and live performance telemetry.
 
 import { createPlayer } from '../src/core/player.js';
+import { createLayer, MAX_LAYERS, MIN_LAYERS } from '../src/core/scene/model.js';
 import { inspectMediaFile } from '../src/core/sources/media-source.js';
+import { AI_SUPPORTED_TYPES, createAiExpandPanel } from './ai-edit.js';
 
 /** @typedef {import('../src/core/player.js').DiagnosticsSample} DiagnosticsSample */
 /** @typedef {import('../src/core/scene/model.js').QualityPresetName} QualityPresetName */
@@ -11,16 +13,18 @@ import { inspectMediaFile } from '../src/core/sources/media-source.js';
 /** @typedef {import('../src/core/scene/model.js').Asset} Asset */
 /** @typedef {import('../src/core/scene/model.js').AssetType} AssetType */
 /** @typedef {import('../src/core/scene/model.js').Layer} Layer */
+/** @typedef {import('../src/core/scene/model.js').Rect} Rect */
 
 /**
  * @typedef {Object} DemoConfiguration
  * @property {'parajaca-config'} format
  * @property {1 | 2} version
  * @property {number} focus
+ * @property {number} depthOfField
  * @property {number} intensityX
  * @property {number} intensityY
  * @property {'high' | 'mid' | 'low'} quality
- * @property {Array<{ x: number, y: number, parallaxPercent: number | null, asset?: Asset }>} layers
+ * @property {Array<{ x: number, y: number, parallaxPercent: number | null, scalePercent: number, asset?: Asset }>} layers
  */
 
 /**
@@ -46,6 +50,8 @@ import { inspectMediaFile } from '../src/core/sources/media-source.js';
 
 const container = /** @type {HTMLElement} */ (document.getElementById('player-container'));
 const focusSlider = /** @type {HTMLInputElement} */ (document.getElementById('focus-slider'));
+const dofSlider = /** @type {HTMLInputElement} */ (document.getElementById('dof-slider'));
+const dofVal = /** @type {HTMLElement} */ (document.getElementById('dof-val'));
 const focusVal = /** @type {HTMLElement} */ (document.getElementById('focus-val'));
 const intensityXSlider = /** @type {HTMLInputElement} */ (document.getElementById('intensity-x-slider'));
 const intensityXVal = /** @type {HTMLElement} */ (document.getElementById('intensity-x-val'));
@@ -73,6 +79,8 @@ const layersBody = /** @type {HTMLElement} */ (document.getElementById('layers-b
 const layersList = /** @type {HTMLElement} */ (document.getElementById('layers-list'));
 const layersStatus = /** @type {HTMLElement} */ (document.getElementById('layers-status'));
 const replaceOpenButton = /** @type {HTMLButtonElement} */ (document.getElementById('replace-open'));
+const addLayerButton = /** @type {HTMLButtonElement} */ (document.getElementById('add-layer'));
+const addLayerInput = /** @type {HTMLInputElement} */ (document.getElementById('add-layer-file'));
 const resetAllButton = /** @type {HTMLButtonElement} */ (document.getElementById('reset-all'));
 const replaceDialog = /** @type {HTMLDialogElement} */ (document.getElementById('replace-dialog'));
 const replaceSlots = /** @type {HTMLElement} */ (document.getElementById('replace-slots'));
@@ -93,13 +101,15 @@ let svgCodeSlot = -1;
 let animationPaused = false;
 
 const SCENE_URL = new URL('scene.json', document.baseURI);
-const LAYER_SLIDER_SPAN_COMP = 500;
+const LAYER_SLIDER_SPAN_COMP = 2000;
 // Numbered file suffixes address existing layers, including optional vector formats.
 const LAYER_SUFFIX_REGEX = /_(\d{1,2})\.(png|webp|jpe?g|svg|json|lottie)$/i;
 const ANIMATION_THUMB = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="80" height="48" viewBox="0 0 80 48"><rect width="80" height="48" fill="#15243a"/><path d="M32 12L54 24L32 36Z" fill="#60a5fa"/></svg>');
 
 let isBusy = false;
 let isSceneReady = false;
+/** @type {ReturnType<typeof createAiExpandPanel> | null} */
+let aiPanel = null;
 
 // Images picked by the user in the replace dialog, keyed by the assetId created for them.
 /** @type {Map<string, { blob: Blob, url: string }>} */
@@ -153,6 +163,13 @@ focusSlider.addEventListener('input', () => {
   focusVal.textContent = d.toFixed(1);
   player.setFocus(d, { animate: true });
 });
+
+function applyDepthOfField() {
+  const percent = Number(dofSlider.value);
+  dofVal.textContent = `${percent}%`;
+  player.setDepthOfFieldStrength(percent / 100);
+}
+dofSlider.addEventListener('input', applyDepthOfField);
 
 // Wire Parallax Intensity Sliders (independent X and Y axes)
 function applyIntensity() {
@@ -245,7 +262,9 @@ function setBusy(busy) {
   isBusy = busy;
   configSaveButton.disabled = busy || !isSceneReady;
   configLoadButton.disabled = busy || !isSceneReady;
+  addLayerButton.disabled = busy || !isSceneReady;
   focusSlider.disabled = busy;
+  dofSlider.disabled = busy;
   intensityXSlider.disabled = busy;
   intensityYSlider.disabled = busy;
   qualitySelect.disabled = busy;
@@ -380,13 +399,25 @@ function createLayerRow({ layer, asset, number, count }) {
   title.className = 'layer-title';
   title.append(heading, name);
 
+  const aiButton = document.createElement('button');
+  aiButton.type = 'button';
+  aiButton.className = 'btn layer-ai';
+  aiButton.textContent = 'IA';
+  aiButton.title = 'Expandir com IA';
+  aiButton.setAttribute('aria-label', `Expandir a camada ${number} com IA`);
+  aiButton.addEventListener('click', () => openAiPanel(layer.id, number));
+
   const head = document.createElement('div');
   head.className = 'layer-head';
-  head.append(thumb, title);
+  head.append(thumb, title, aiButton);
 
   const pos = { ...layer.placement };
   const moveLayer = () => {
-    player.edit({ type: 'set-layer', layerId: layer.id, changesLayer: { placement: { ...pos } } });
+    const current = getDefaultVariant(player.getScene())?.layers.find((item) => item.id === layer.id);
+    if (!current) return;
+    player.edit({ type: 'set-layer', layerId: layer.id, changesLayer: {
+      placement: { ...current.placement, x: pos.x, y: pos.y },
+    } });
   };
   const axisX = createAxisControl({
     label: 'X', ariaLabel: `X da camada ${number}`, initial: pos.x,
@@ -413,7 +444,27 @@ function createLayerRow({ layer, asset, number, count }) {
     },
   });
 
-  row.append(head, axisX.element, axisY.element, parallax.element);
+  const scale = document.createElement('div');
+  scale.className = 'layer-axis layer-parallax layer-scale';
+  const scaleLabel = document.createElement('label');
+  scaleLabel.textContent = '⤢';
+  scaleLabel.setAttribute('aria-hidden', 'true');
+  const scaleRange = document.createElement('input');
+  scaleRange.type = 'range';
+  scaleRange.min = '5';
+  scaleRange.max = '500';
+  scaleRange.step = '1';
+  scaleRange.value = String(layer.scalePercent ?? 100);
+  scaleRange.setAttribute('aria-label', `Escala da camada ${number} (%)`);
+  const scaleValue = document.createElement('span');
+  scaleValue.textContent = `${scaleRange.value}%`;
+  scaleRange.addEventListener('input', () => {
+    const scalePercent = Number(scaleRange.value);
+    scaleValue.textContent = `${scalePercent}%`;
+    player.edit({ type: 'set-layer', layerId: layer.id, changesLayer: { scalePercent } });
+  });
+  scale.append(scaleLabel, scaleRange, scaleValue);
+  row.append(head, axisX.element, axisY.element, parallax.element, scale);
   return {
     element: row,
     reset() {
@@ -424,6 +475,63 @@ function createLayerRow({ layer, asset, number, count }) {
       moveLayer();
     },
   };
+}
+
+/**
+ * Opens the AI expansion editor; the result replaces the layer image with its content in place.
+ * @param {string} layerId
+ * @param {number} number 1-based position (1 = back)
+ */
+function openAiPanel(layerId, number) {
+  if (isBusy) return;
+  const scene = player.getScene();
+  const layer = getDefaultVariant(scene)?.layers.find((item) => item.id === layerId);
+  const asset = layer ? scene.assets.find((item) => item.id === layer.assetId) : undefined;
+  if (!asset) return;
+  if (!AI_SUPPORTED_TYPES.includes(asset.type)) {
+    setLayersStatus('A expansão com IA aceita camadas PNG, JPG ou WebP.', true);
+    return;
+  }
+  aiPanel ??= createAiExpandPanel();
+  aiPanel.open({
+    title: `Camada ${number}`,
+    asset,
+    async loadSource(signal) {
+      const override = imageOverrides.get(asset.id);
+      if (override) return override.blob;
+      const response = await fetch(new URL(asset.path, SCENE_URL), { signal });
+      signal.throwIfAborted();
+      if (!response.ok) {
+        throw new Error(`Arquivo não encontrado: ${asset.path} (HTTP ${response.status}).`);
+      }
+      const blob = await response.blob();
+      signal.throwIfAborted();
+      return blob;
+    },
+    async onApply({ file, sizeTex, marginsTex }) {
+      const current = getDefaultVariant(player.getScene())?.layers
+        .find((item) => item.id === layerId);
+      if (!current) return { ok: false, message: `Camada ${number} não encontrada.` };
+      // Same scale as before; the origin moves by the new left/top strips.
+      const compPerTex = (current.scalePercent ?? 100) / 100;
+      const leftComp = marginsTex.left * compPerTex;
+      const topComp = marginsTex.top * compPerTex;
+      const widthComp = sizeTex.width * compPerTex;
+      const heightComp = sizeTex.height * compPerTex;
+      setBusy(true);
+      const result = await replaceLayerImages([{ layerId, number,
+        placementComp: { x: current.placement.x - leftComp, y: current.placement.y - topComp,
+          width: widthComp, height: heightComp },
+        image: { file, type: 'png', width: sizeTex.width, height: sizeTex.height,
+          previewUrl: '' } }]);
+      setBusy(false);
+      const message = result.ok
+        ? `Camada ${number} expandida para ${sizeTex.width}×${sizeTex.height} px.`
+        : result.message;
+      setLayersStatus(message, !result.ok);
+      return { ok: result.ok, message };
+    },
+  });
 }
 
 /**
@@ -464,6 +572,7 @@ function captureConfiguration(scene, variant) {
     format: 'parajaca-config',
     version: 2,
     focus: Number(focusSlider.value),
+    depthOfField: Number(dofSlider.value),
     intensityX: Number(intensityXSlider.value),
     intensityY: Number(intensityYSlider.value),
     quality: /** @type {'high' | 'mid' | 'low'} */ (qualitySelect.value),
@@ -473,7 +582,7 @@ function captureConfiguration(scene, variant) {
       const path = imageOverrides.has(asset.id)
         ? `assets/${encodeURIComponent(asset.name).replace(/\.\./g, '%2E%2E')}` : asset.path;
       return { x: layer.placement.x, y: layer.placement.y,
-        parallaxPercent: layer.parallaxPercent ?? null, asset: { ...asset, path } };
+        parallaxPercent: layer.parallaxPercent ?? null, scalePercent: layer.scalePercent ?? 100, asset: { ...asset, path } };
     }),
   };
 }
@@ -493,6 +602,11 @@ function parseConfiguration(value, variant) {
     throw new Error('Formato ou versão de configuração não reconhecido.');
   }
   const { focus, intensityX, intensityY, quality } = data;
+  const depthOfField = data.depthOfField === undefined ? 100 : data.depthOfField;
+  if (typeof depthOfField !== 'number' || !Number.isInteger(depthOfField)
+    || depthOfField < 0 || depthOfField > 100) {
+    throw new Error('Intensidade de desfoque deve estar entre 0 e 100.');
+  }
   if (typeof focus !== 'number' || !Number.isFinite(focus)
     || focus < variant.optics.focusRange[0] || focus > variant.optics.focusRange[1]
     || Math.abs(focus * 10 - Math.round(focus * 10)) > 1e-7) {
@@ -507,8 +621,9 @@ function parseConfiguration(value, variant) {
   if (quality !== 'high' && quality !== 'mid' && quality !== 'low') {
     throw new Error('Qualidade inválida na configuração.');
   }
-  if (!Array.isArray(data.layers) || data.layers.length !== variant.layers.length) {
-    throw new Error(`A configuração deve ter ${variant.layers.length} camadas, como a cena atual.`);
+  if (!Array.isArray(data.layers) || data.layers.length < MIN_LAYERS || data.layers.length > MAX_LAYERS
+    || (data.version === 1 && data.layers.length !== variant.layers.length)) {
+    throw new Error(`A configuração deve ter entre ${MIN_LAYERS} e ${MAX_LAYERS} camadas.`);
   }
   const layers = data.layers.map((rawLayer, index) => {
     if (!rawLayer || typeof rawLayer !== 'object' || Array.isArray(rawLayer)) {
@@ -516,6 +631,10 @@ function parseConfiguration(value, variant) {
     }
     const layer = /** @type {Record<string, unknown>} */ (rawLayer);
     const { x, y, parallaxPercent } = layer;
+    const scalePercent = layer.scalePercent === undefined ? 100 : layer.scalePercent;
+    if (typeof scalePercent !== 'number' || !Number.isFinite(scalePercent) || scalePercent < 5 || scalePercent > 500) {
+      throw new Error(`Escala inválida na camada ${index + 1}.`);
+    }
     if (typeof x !== 'number' || !Number.isFinite(x)
       || typeof y !== 'number' || !Number.isFinite(y)
       || (parallaxPercent !== null && (typeof parallaxPercent !== 'number'
@@ -536,11 +655,11 @@ function parseConfiguration(value, variant) {
         || item.path.includes('..') || /%2f|%5c/i.test(item.path)) {
         throw new Error(`Arquivo inválido na camada ${index + 1}.`);
       }
-      return { x, y, parallaxPercent, asset: /** @type {Asset} */ (/** @type {unknown} */ (item)) };
+      return { x, y, parallaxPercent, scalePercent, asset: /** @type {Asset} */ (/** @type {unknown} */ (item)) };
     }
-    return { x, y, parallaxPercent };
+    return { x, y, parallaxPercent, scalePercent };
   });
-  return { format: 'parajaca-config', version: /** @type {1 | 2} */ (data.version), focus, intensityX, intensityY, quality, layers };
+  return { format: 'parajaca-config', version: /** @type {1 | 2} */ (data.version), focus, depthOfField, intensityX, intensityY, quality, layers };
 }
 
 /**
@@ -564,6 +683,7 @@ async function applyConfiguration(configuration, variant) {
         changesLayer: {
           placement: { ...layer.placement, x: saved.x, y: saved.y },
           parallaxPercent: saved.parallaxPercent,
+          scalePercent: saved.scalePercent,
         },
       });
       if (editError) throw new Error(editError);
@@ -586,6 +706,8 @@ async function applyConfiguration(configuration, variant) {
     stopError();
   }
 
+  dofSlider.value = String(configuration.depthOfField);
+  applyDepthOfField();
   focusSlider.value = String(configuration.focus);
   player.setFocus(configuration.focus, { animate: false });
   intensityXSlider.value = String(configuration.intensityX);
@@ -617,13 +739,16 @@ async function restoreConfigurationAssets(configuration) {
     if (!response.ok) throw new Error(`Arquivo não encontrado: ${asset.path} (HTTP ${response.status}).`);
   }
   scene.assets = scene.assets.filter((asset) => !oldAssetIds.includes(asset.id));
-  for (let index = 0; index < layers.length; index++) {
+  variant.layers = savedAssets.map((asset, index) => createLayer(asset.id, index, scene.reference));
+  const restoredLayers = sortedLayers(variant);
+  for (let index = 0; index < restoredLayers.length; index++) {
     const saved = configuration.layers[index];
     const asset = { ...savedAssets[index], id: crypto.randomUUID() };
     scene.assets.push(asset);
-    layers[index].assetId = asset.id;
-    layers[index].placement = { x: saved.x, y: saved.y, width: asset.width, height: asset.height };
-    layers[index].parallaxPercent = saved.parallaxPercent;
+    restoredLayers[index].assetId = asset.id;
+    restoredLayers[index].placement = { x: saved.x, y: saved.y, width: asset.width * saved.scalePercent / 100, height: asset.height * saved.scalePercent / 100 };
+    restoredLayers[index].parallaxPercent = saved.parallaxPercent;
+    restoredLayers[index].scalePercent = saved.scalePercent;
   }
   let ready = false;
   let message = '';
@@ -642,6 +767,8 @@ async function restoreConfigurationAssets(configuration) {
     throw new Error(`Falha ao carregar os arquivos: ${message || 'cena não carregada'}.`);
   }
   oldAssetIds.forEach(releaseOverride);
+  dofSlider.value = String(configuration.depthOfField);
+  applyDepthOfField();
   focusSlider.value = String(configuration.focus);
   player.setFocus(configuration.focus, { animate: false });
   intensityXSlider.value = String(configuration.intensityX);
@@ -925,7 +1052,9 @@ async function assignFiles(files) {
 /**
  * Replaces the image of several layers with a single scene reload (the player has no per-layer swap
  * yet). On failure the previous scene is restored.
- * @param {Array<{ layerId: string, number: number, image: PendingImage }>} entries
+ * @param {Array<{ layerId: string, number: number, image: PendingImage,
+ *   placementComp?: Rect }>} entries placementComp keeps the layer scale and position (AI
+ *   expansion); otherwise the image enters 1:1
  * @returns {Promise<{ ok: boolean, message: string }>}
  */
 async function replaceLayerImages(entries) {
@@ -941,7 +1070,7 @@ async function replaceLayerImages(entries) {
   /** @type {string[]} */
   const oldAssetIds = [];
   try {
-    for (const { layerId, number, image } of entries) {
+    for (const { layerId, number, image, placementComp } of entries) {
       const layer = variant.layers.find((l) => l.id === layerId);
       if (!layer) {
         throw new Error(`Camada ${number} não encontrada`);
@@ -962,8 +1091,13 @@ async function replaceLayerImages(entries) {
       oldAssetIds.push(oldAssetId);
       scene.assets = scene.assets.map((a) => (a.id === oldAssetId ? asset : a));
       layer.assetId = assetId;
-      layer.placement.width = image.width;
-      layer.placement.height = image.height;
+      if (placementComp) {
+        layer.placement = { ...placementComp };
+      } else {
+        layer.scalePercent = 100;
+        layer.placement.width = image.width;
+        layer.placement.height = image.height;
+      }
     }
 
     const outcome = { ready: false, error: /** @type {string | null} */ (null) };
@@ -1001,6 +1135,51 @@ function releaseOverride(assetId) {
   URL.revokeObjectURL(override.url);
   imageOverrides.delete(assetId);
 }
+
+addLayerButton.addEventListener('click', () => { if (!isBusy && isSceneReady) addLayerInput.click(); });
+addLayerInput.addEventListener('change', async () => {
+  const file = addLayerInput.files?.[0];
+  addLayerInput.value = '';
+  if (!file || isBusy || !isSceneReady) return;
+  const previous = player.getScene();
+  const scene = player.getScene();
+  const variant = getDefaultVariant(scene);
+  if (!variant || variant.layers.length >= MAX_LAYERS) {
+    setLayersStatus(`Máximo de ${MAX_LAYERS} camadas.`, true);
+    return;
+  }
+  setBusy(true);
+  let assetId = '';
+  try {
+    const controller = new AbortController();
+    const image = await inspectMediaFile(file, controller.signal);
+    assetId = crypto.randomUUID();
+    const ext = image.type === 'lottie' ? 'json' : image.type === 'dotlottie' ? 'lottie' : image.type;
+    scene.assets.push({ id: assetId, name: file.name, type: image.type,
+      width: image.width, height: image.height, path: `assets/${assetId}.${ext}` });
+    imageOverrides.set(assetId, { blob: file, url: URL.createObjectURL(file) });
+    const layer = createLayer(assetId, variant.layers.length, scene.reference);
+    layer.placement.width = image.width;
+    layer.placement.height = image.height;
+    variant.layers.forEach((item) => { item.parallaxPercent = null; });
+    variant.layers.push(layer);
+    let ready = false;
+    let message = '';
+    const stopReady = player.on('ready', () => { ready = true; });
+    const stopError = player.on('error', (payload) => { message = String(payload.message); });
+    try { await player.load(scene); } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    } finally { stopReady(); stopError(); }
+    if (!ready) {
+      await player.load(previous);
+      throw new Error(message || 'Não foi possível carregar a camada.');
+    }
+    setLayersStatus('Camada adicionada e paralaxe redistribuída.');
+  } catch (error) {
+    if (assetId) releaseOverride(assetId);
+    setLayersStatus(error instanceof Error ? error.message : String(error), true);
+  } finally { setBusy(false); }
+});
 
 replaceOpenButton.addEventListener('click', openReplaceDialog);
 svgCodeCancel.addEventListener('click', () => svgCodeDialog.close());

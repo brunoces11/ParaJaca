@@ -81,7 +81,7 @@ export const WHEEL_FOCUS_STEP = 2;
  * @property {Partial<Motion>} [changesMotion]
  * @property {Partial<Quality>} [changesQuality]
  * @property {string} [layerId]
- * @property {Partial<Pick<Layer, 'depth'|'focusMode'|'fixedBlur'|'order'|'placement'|'parallaxPercent'>>} [changesLayer]
+ * @property {Partial<Pick<Layer, 'depth'|'focusMode'|'fixedBlur'|'order'|'placement'|'parallaxPercent'|'scalePercent'>>} [changesLayer]
  * @property {number} [x]
  * @property {number} [y]
  * @property {Scene} [scene]
@@ -92,6 +92,7 @@ export const WHEEL_FOCUS_STEP = 2;
  * @property {(source: string | Scene) => Promise<void>} load
  * @property {(id: string) => Promise<void>} setVariant
  * @property {(d: number, opts?: { animate?: boolean }) => void} setFocus
+ * @property {(strength: number) => void} setDepthOfFieldStrength
  * @property {(preset: QualityPresetName) => void} setQuality
  * @property {(intensity: number, intensityY?: number) => void} setIntensity
  * @property {() => void} resize
@@ -285,6 +286,7 @@ export function createPlayer(container, options = {}) {
     dirtyFlags: 0,
     focusCurrent: 50,
     focusTarget: 50,
+    depthOfFieldStrength: 1,
     inputTargetX: 0,
     inputTargetY: 0,
     inputCurrentX: 0,
@@ -381,11 +383,11 @@ export function createPlayer(container, options = {}) {
 
       // Current blur sigma
       const sigmaRef = computeLayerSigmaRef(layer.focusMode, depth, focusCurrent, layer.fixedBlur, optics);
-      const sigmaRender = sigmaRef * refFactor;
+      const sigmaRender = sigmaRef * refFactor * runtime.depthOfFieldStrength;
 
       // Target blur sigma for convergence test
       const targetSigmaRef = computeLayerSigmaRef(layer.focusMode, depth, runtime.focusTarget, layer.fixedBlur, optics);
-      const targetSigmaRender = targetSigmaRef * refFactor;
+      const targetSigmaRender = targetSigmaRef * refFactor * runtime.depthOfFieldStrength;
       const sigmaDiffRender = Math.abs(targetSigmaRender - sigmaRender);
       if (sigmaDiffRender > maxRemainingSigmaRender) {
         maxRemainingSigmaRender = sigmaDiffRender;
@@ -595,6 +597,17 @@ export function createPlayer(container, options = {}) {
   }
 
   /**
+   * Sets the global blur intensity from 0 to 1 without rebuilding textures.
+   * @param {number} strength
+   */
+  function setDepthOfFieldStrength(strength) {
+    if (!Number.isFinite(strength)) return;
+    runtime.depthOfFieldStrength = Math.max(0, Math.min(1, strength));
+    runtime.dirtyFlags |= DIRTY_FRAME;
+    requestFrame();
+  }
+
+  /**
    * Sets parallax motion intensity dynamically: `intensity` for the X axis and `intensityY` for the
    * Y axis (defaults to `intensity`). The camera does not zoom or constrain layer movement.
    * @param {number} intensity
@@ -620,10 +633,13 @@ export function createPlayer(container, options = {}) {
     const rectComp = layer ? runtime.layerRectComp.get(layer.id) : undefined;
     const target = command.changesLayer?.placement;
     const percent = command.changesLayer?.parallaxPercent;
+    const scalePercent = command.changesLayer?.scalePercent;
+    const req = layer ? runtime.layerRequirements.get(layer.id) : undefined;
     if (
       !layer
       || !rectComp
-      || (!target && percent === undefined)
+      || (!target && percent === undefined && scalePercent === undefined)
+      || (scalePercent !== undefined && (!Number.isFinite(scalePercent) || scalePercent < 5 || scalePercent > 500 || !req))
       || (target && (
         !Number.isFinite(target.x) || !Number.isFinite(target.y)
         || target.width !== layer.placement.width || target.height !== layer.placement.height
@@ -649,6 +665,22 @@ export function createPlayer(container, options = {}) {
       if (configLayer) {
         configLayer.placement.x = target.x;
         configLayer.placement.y = target.y;
+      }
+    }
+    if (scalePercent !== undefined && req) {
+      const ratio = scalePercent / (layer.scalePercent ?? 100);
+      rectComp.x = layer.placement.x + (rectComp.x - layer.placement.x) * ratio;
+      rectComp.y = layer.placement.y + (rectComp.y - layer.placement.y) * ratio;
+      rectComp.width *= ratio;
+      rectComp.height *= ratio;
+      req.texScale /= ratio;
+      layer.placement.width *= ratio;
+      layer.placement.height *= ratio;
+      layer.scalePercent = scalePercent;
+      if (configLayer) {
+        configLayer.placement.width = layer.placement.width;
+        configLayer.placement.height = layer.placement.height;
+        configLayer.scalePercent = scalePercent;
       }
     }
     if (percent !== undefined) {
@@ -945,6 +977,7 @@ export function createPlayer(container, options = {}) {
     setAnimationPaused,
     async setVariant() {},
     setFocus,
+    setDepthOfFieldStrength,
     setQuality,
     setIntensity,
     resize,

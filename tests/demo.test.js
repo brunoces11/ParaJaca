@@ -74,6 +74,7 @@ test('configuration restores saved assets and accepts older configuration files'
     return element;
   }
   control('focus-slider').value = '50';
+  control('dof-slider').value = '100';
   control('intensity-x-slider').value = '400';
   control('intensity-y-slider').value = '100';
   control('quality-select').value = 'high';
@@ -86,6 +87,7 @@ test('configuration restores saved assets and accepts older configuration files'
   /** @param {string} event @param {{ d?: number, message?: string }} payload */
   function emit(event, payload) { events.get(event)?.forEach((handler) => handler(payload)); }
   let focus = 50;
+  let depthOfField = 1;
   let intensityX = 0;
   let intensityY = 0;
   let quality = 'high';
@@ -99,6 +101,8 @@ test('configuration restores saved assets and accepts older configuration files'
     getScene() { return structuredClone(scene); },
     /** @param {number} value */
     setFocus(value) { focus = value; emit('focus-change', { d: value }); },
+    /** @param {number} value */
+    setDepthOfFieldStrength(value) { depthOfField = value; },
     /** @param {number} x @param {number} y */
     setIntensity(x, y) { intensityX = x; intensityY = y; },
     /** @param {string} value */
@@ -118,7 +122,18 @@ test('configuration restores saved assets and accepts older configuration files'
       }
       const layer = scene.variants[0].layers.find((item) => item.id === command.layerId);
       assert.ok(layer);
-      if (command.changesLayer?.placement) layer.placement = { ...command.changesLayer.placement };
+      if (command.changesLayer?.placement) {
+        assert.equal(command.changesLayer.placement.width, layer.placement.width);
+        assert.equal(command.changesLayer.placement.height, layer.placement.height);
+        layer.placement = { ...command.changesLayer.placement };
+      }
+      if (command.changesLayer?.scalePercent !== undefined) {
+        const asset = scene.assets.find((item) => item.id === layer.assetId);
+        assert.ok(asset);
+        layer.scalePercent = command.changesLayer.scalePercent;
+        layer.placement.width = asset.width * layer.scalePercent / 100;
+        layer.placement.height = asset.height * layer.scalePercent / 100;
+      }
       if (command.changesLayer?.parallaxPercent !== undefined) {
         layer.parallaxPercent = command.changesLayer.parallaxPercent;
       }
@@ -177,6 +192,7 @@ test('configuration restores saved assets and accepts older configuration files'
   await waitFor(() => control('layers-list').children.length === 7);
 
   input(control('focus-slider'), '73.4');
+  input(control('dof-slider'), '35');
   input(control('intensity-x-slider'), '300');
   input(control('intensity-y-slider'), '40');
   control('quality-select').value = 'low';
@@ -185,6 +201,11 @@ test('configuration restores saved assets and accepts older configuration files'
   input(child(child(row, 1), 2), '-1250');
   input(child(child(row, 2), 2), '2050');
   input(child(child(row, 3), 2), '66.6');
+  input(child(child(row, 4), 1), '33');
+  input(child(child(row, 4), 1), '67');
+  input(child(child(row, 1), 2), '-1250');
+  input(child(child(row, 2), 2), '2050');
+  input(child(child(row, 4), 1), '200');
   chosenName = null;
   control('config-save').click();
   assert.equal(download, null);
@@ -197,41 +218,43 @@ test('configuration restores saved assets and accepts older configuration files'
   assert.ok(blob);
   const savedText = await blob.text();
   URL.revokeObjectURL(savedDownload.href);
-  const saved = /** @type {{ version: number, focus: number, intensityX: number, intensityY: number, quality: string, layers: Array<{ x: number, y: number, parallaxPercent: number | null, asset: import('../src/core/scene/model.js').Asset }> }} */ (JSON.parse(savedText));
-  assert.deepEqual(saved.layers[1], { x: -1250, y: 2050, parallaxPercent: 66.6, asset: originalAssets[1] });
+  const saved = /** @type {{ version: number, focus: number, intensityX: number, intensityY: number, quality: string, depthOfField: number, layers: Array<{ x: number, y: number, parallaxPercent: number | null, scalePercent: number, asset: import('../src/core/scene/model.js').Asset }> }} */ (JSON.parse(savedText));
+  assert.deepEqual(saved.layers[1], { x: -1250, y: 2050, parallaxPercent: 66.6, scalePercent: 200, asset: originalAssets[1] });
   assert.equal(saved.version, 2);
+  assert.equal(saved.depthOfField, 35);
   assert.deepEqual(saved.layers.map((layer) => layer.asset.path), originalAssets.map((asset) => asset.path));
   assert.equal(saved.layers[0].parallaxPercent, null);
   assert.deepEqual([saved.focus, saved.intensityX, saved.intensityY, saved.quality],
     [73.4, 300, 40, 'low']);
   assert.equal('assets' in saved, false);
 
+  input(control('dof-slider'), '0');
   input(control('focus-slider'), '10');
   input(control('intensity-x-slider'), '10');
   input(child(child(row, 1), 2), '5');
   input(child(child(row, 3), 2), '2');
   const fileInput = control('config-file');
-  const legacy = { ...saved, version: 1, layers: saved.layers.map(({ x, y, parallaxPercent }) => ({ x, y, parallaxPercent })) };
+  const legacy = { ...saved, version: 1, layers: saved.layers.map(({ x, y, parallaxPercent, scalePercent }) => ({ x, y, parallaxPercent, scalePercent })) };
   fileInput.files = [new File([JSON.stringify(legacy)], 'space.json', { type: 'application/json' })];
   fileInput.dispatchEvent(new Event('change'));
   await waitFor(() => control('config-status').textContent.startsWith('Configuração carregada'));
-  assert.deepEqual([focus, intensityX, intensityY, quality], [73.4, 300, 40, 'low']);
+  assert.deepEqual([focus, intensityX, intensityY, quality, depthOfField], [73.4, 300, 40, 'low', 0.35]);
   assert.deepEqual(scene.assets, originalAssets);
   assert.deepEqual(scene.variants[0].layers[1].placement,
-    { x: -1250, y: 2050, width: 1920, height: 1080 });
+    { x: -1250, y: 2050, width: 3840, height: 2160 });
   assert.equal(scene.variants[0].layers[1].parallaxPercent, 66.6);
   const rebuiltRow = child(control('layers-list'), 1);
   assert.equal(child(child(rebuiltRow, 1), 2).value, '-1250');
   assert.equal(child(child(rebuiltRow, 3), 2).value, '66.6');
 
   const snapshot = structuredClone(scene);
-  const invalid = { ...saved, layers: saved.layers.slice(1) };
+  const invalid = { ...saved, layers: saved.layers.slice(0, 3) };
   fileInput.files = [new File([JSON.stringify(invalid)], 'wrong.json')];
   fileInput.dispatchEvent(new Event('change'));
   await waitFor(() => control('config-status').classList.contains('error'));
-  assert.match(control('config-status').textContent, /7 camadas/);
+  assert.match(control('config-status').textContent, /entre 4 e 11 camadas/);
   assert.deepEqual(scene, snapshot);
-  assert.deepEqual([focus, intensityX, intensityY, quality], [73.4, 300, 40, 'low']);
+  assert.deepEqual([focus, intensityX, intensityY, quality, depthOfField], [73.4, 300, 40, 'low', 0.35]);
 
   fileInput.files = [new File(['not JSON'], 'invalid.json')];
   fileInput.dispatchEvent(new Event('change'));
@@ -245,13 +268,24 @@ test('configuration restores saved assets and accepts older configuration files'
   fileInput.dispatchEvent(new Event('change'));
   await waitFor(() => control('config-status').textContent.includes('Simulated edit failure'));
   assert.deepEqual(scene, snapshot);
-  assert.deepEqual([focus, intensityX, intensityY, quality], [73.4, 300, 40, 'low']);
+  assert.deepEqual([focus, intensityX, intensityY, quality, depthOfField], [73.4, 300, 40, 'low', 0.35]);
 
   fileInput.files = [new File([savedText], 'scene.json')];
   fileInput.dispatchEvent(new Event('change'));
   await waitFor(() => control('config-status').textContent.includes('arquivos das camadas carregados'));
   assert.deepEqual(scene.assets.map((asset) => asset.path), originalAssets.map((asset) => asset.path));
-  assert.deepEqual(scene.variants[0].layers[1].placement, { x: -1250, y: 2050, width: 1920, height: 1080 });
+  assert.deepEqual(scene.variants[0].layers[1].placement, { x: -1250, y: 2050, width: 3840, height: 2160 });
+
+  const tenLayers = structuredClone(saved);
+  while (tenLayers.layers.length < 10) tenLayers.layers.push(structuredClone(tenLayers.layers[0]));
+  fileInput.files = [new File([JSON.stringify(tenLayers)], 'ten.json')];
+  fileInput.dispatchEvent(new Event('change'));
+  await waitFor(() => scene.variants[0].layers.length === 10 && !control('config-load').disabled);
+  assert.equal(control('layers-list').children.length, 10);
+  fileInput.files = [new File([savedText], 'seven.json')];
+  fileInput.dispatchEvent(new Event('change'));
+  await waitFor(() => scene.variants[0].layers.length === 7 && !control('config-load').disabled);
+  assert.equal(control('layers-list').children.length, 7);
 
   const restored = structuredClone(scene);
   Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: async () => ({ ok: false, status: 404 }) });

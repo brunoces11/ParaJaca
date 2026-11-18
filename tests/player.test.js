@@ -284,3 +284,56 @@ test('invalid percentage edits are rejected without moving or changing the layer
   assert.equal(h.errors.length, 1);
   assert.deepEqual(h.player.getScene(), before);
 });
+
+
+test('global depth of field scales blur without changing parallax or rebuilding textures', async (t) => {
+  const h = createHarness();
+  t.after(h.cleanup);
+  await h.player.load(createScene());
+  h.player.setFocus(0, { animate: false });
+  h.pointAt({ x: 1920, y: 1080 });
+  h.flush();
+  const full = h.getFrame();
+  const prepared = h.getPreparedCount();
+  h.player.setDepthOfFieldStrength(0);
+  h.flush();
+  const clear = h.getFrame();
+  h.player.setDepthOfFieldStrength(0.5);
+  h.flush();
+  const half = h.getFrame();
+  for (let i = 0; i < full.layerCount * 4; i++) {
+    assert.ok(Math.abs(clear.rects[i] - full.rects[i]) < 0.1);
+  }
+  assert.equal(h.getPreparedCount(), prepared);
+  assert.ok([...full.lods].some((lod, i) => lod > clear.lods[i]));
+  for (let i = 0; i < full.layerCount; i++) {
+    assert.ok(half.lods[i] >= clear.lods[i] && half.lods[i] <= full.lods[i]);
+  }
+});
+
+
+test('layer scale preserves aspect ratio, anchor, and authored size through reload', async (t) => {
+  const h = createHarness();
+  t.after(h.cleanup);
+  await h.player.load(createScene());
+  h.flush();
+  await h.player.edit({ type: 'set-layer', layerId: 'layer-1', changesLayer: { scalePercent: 200 } });
+  h.flush();
+  let layer = h.player.getScene().variants[0].layers[1];
+  assert.deepEqual(layer.placement, { x: 0, y: 0, width: 6000, height: 2160 });
+  assert.deepEqual([...h.getFrame().rects.slice(4, 8)], [0, 0, 6000, 2160]);
+  await h.player.load(h.player.getScene());
+  h.flush();
+  layer = h.player.getScene().variants[0].layers[1];
+  assert.equal(layer.scalePercent, 200);
+  assert.deepEqual(layer.placement, { x: 0, y: 0, width: 6000, height: 2160 });
+  for (const scalePercent of [5, 500]) {
+    await h.player.edit({ type: 'set-layer', layerId: 'layer-1', changesLayer: { scalePercent } });
+    h.flush();
+    const scaled = h.player.getScene().variants[0].layers[1];
+    assert.equal(scaled.placement.width, 3000 * scalePercent / 100);
+    assert.equal(scaled.placement.height, 1080 * scalePercent / 100);
+    assert.deepEqual([scaled.placement.x, scaled.placement.y], [0, 0]);
+  }
+  assert.deepEqual(h.errors, []);
+});

@@ -38,6 +38,7 @@ Precedência em caso de conflito:
 
 ## 3. Como escrever o código (resumo; o detalhe está no contrato)
 
+- Novos parâmetros de configuração da cena devem ser persistidos no JSON ao salvar e restaurados ao carregar, com validação apropriada.
 - Copie **literalmente** nomes de arquivos, funções, constantes, typedefs, eventos, códigos de erro, fórmulas e trechos GLSL do `REGRAS_DE_CODIGO.txt`. Não renomeie, não "melhore", não generalize.
 - JavaScript ES modules + JSDoc; `npm run typecheck` com 0 erros. Sem `any`, sem `@ts-ignore`.
 - Código e comentários em inglês; textos do estúdio em pt-BR só em `src/studio/strings.js`.

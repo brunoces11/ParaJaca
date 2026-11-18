@@ -96,6 +96,7 @@
     .layer-axis input[type="range"] { flex: 1; min-width: 0; accent-color: #4ade80; cursor: pointer; }
     .layer-parallax input[type="range"] { accent-color: #38bdf8; }
     .layer-parallax label { color: #38bdf8; }
+    .layer-scale label { font-size: 16px; line-height: 1; }
     .layer-axis input[type="number"] {
       width: 64px;
       background: #1e293b;
@@ -138,6 +139,51 @@
     .slot-row .layer-title span.pending { color: #4ade80; }
     #replace-status { margin-top: 8px; font-size: 11px; color: #94a3b8; min-height: 14px; }
     .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+    .layer-ai { margin-left: auto; flex: none; }
+    dialog#ai-dialog {
+      margin: auto;
+      width: min(1280px, 96vw);
+      height: min(860px, 94vh);
+      padding: 0;
+      color: #eee;
+      background: #0f141e;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 10px;
+    }
+    dialog#ai-dialog::backdrop { background: rgba(0, 0, 0, 0.75); }
+    .ai-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; height: 100%; }
+    #ai-stage { display: block; width: 100%; height: 100%; min-height: 0; background: #0b0f17; }
+    #ai-stage.drawing { cursor: crosshair; touch-action: none; }
+    .ai-side { display: flex; flex-direction: column; gap: 10px; padding: 16px; overflow-x: hidden; overflow-y: auto; border-left: 1px solid rgba(255, 255, 255, 0.12); }
+    .ai-side h2 { font-size: 15px; color: #4ade80; }
+    .ai-side fieldset { border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; padding: 8px 10px; }
+    .ai-side legend, .ai-side > label { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; }
+    .ai-grid { display: grid; grid-template-columns: repeat(3, 38px); gap: 4px; justify-content: center; }
+    .ai-grid .btn { padding: 6px 0; font-size: 15px; }
+    .ai-side .btn[aria-pressed="true"] { background: #166534; border-color: #4ade80; }
+    .ai-size { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #94a3b8; }
+    .ai-size input { width: 76px; }
+    .ai-side input[type="number"], .ai-side input[type="password"], .ai-side textarea {
+      background: #1e293b;
+      color: #fff;
+      border: 1px solid #334155;
+      border-radius: 4px;
+      padding: 4px 6px;
+      font: 12px monospace;
+    }
+    .ai-side textarea { width: 100%; min-height: 72px; resize: vertical; font-family: inherit; }
+    .ai-side input[type="range"] { width: 100%; accent-color: #4ade80; }
+    .ai-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .ai-swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+    .ai-swatch[aria-pressed="true"] { border-color: #fff; }
+    .ai-swatch:disabled { opacity: 0.5; cursor: default; }
+    #ai-status { min-height: 30px; font-size: 11px; line-height: 1.4; color: #94a3b8; }
+    #ai-status.error { color: #fca5a5; }
+    .ai-side .dialog-actions { position: sticky; bottom: -16px; flex-wrap: wrap; margin: auto -16px -16px; padding: 10px 16px 16px; background: #0f141e; border-top: 1px solid rgba(255, 255, 255, 0.12); }
+    @media (max-width: 800px) {
+      .ai-layout { grid-template-columns: 1fr; grid-template-rows: 45vh auto; }
+      .ai-side { border-left: 0; }
+    }
   </style>
 </head>
 <body>
@@ -169,6 +215,15 @@
         </div>
         <input type="range" id="focus-slider" min="0" max="100" step="0.1" value="50">
         <div class="hud-hint">Dica: Segure <b>Alt + Scroll do mouse</b> sobre o canvas</div>
+      </div>
+
+      <div class="hud-row">
+        <div class="hud-row-header">
+          <label for="dof-slider">Intensidade do desfoque:</label>
+          <span class="hud-val" id="dof-val">100%</span>
+        </div>
+        <input type="range" id="dof-slider" min="0" max="100" step="1" value="100">
+        <div class="hud-hint">0% mantém todas as camadas em foco; 100% aplica o desfoque máximo da cena.</div>
       </div>
 
       <!-- Controle de Intensidade de Paralaxe (eixos independentes) -->
@@ -221,10 +276,12 @@
     <div class="panel-body" id="layers-body">
       <div class="layers-toolbar">
         <button type="button" class="btn" id="replace-open">Importar imagem / animação</button>
+        <button type="button" class="btn" id="add-layer">Adicionar camada</button>
         <button type="button" class="btn" id="reset-all">Zerar X/Y</button>
       </div>
       <div class="hud-hint">X/Y em px da composição (1920×1080). Camada 1 = fundo; a última é a mais próxima.</div>
       <div class="hud-hint">Imagens em tamanho original (1:1 na composição). % = parcela dos máximos X/Y; 0% fixa, 100% máxima. Bordas são ajustadas pelo usuário.</div>
+      <input type="file" id="add-layer-file" accept=".png,.jpg,.jpeg,.webp,.svg,.json,.lottie" hidden>
       <div id="layers-list"></div>
       <div id="layers-status" role="status"></div>
     </div>
@@ -261,6 +318,58 @@
     <div class="dialog-actions">
       <button type="button" class="btn" id="svg-code-cancel">Cancelar</button>
       <button type="button" class="btn primary" id="svg-code-apply">Inserir na camada</button>
+    </div>
+  </dialog>
+
+  <dialog id="ai-dialog" aria-labelledby="ai-title">
+    <div class="ai-layout">
+      <canvas id="ai-stage" aria-label="Prévia da camada expandida; arraste para rabiscar"></canvas>
+      <div class="ai-side">
+        <h2 id="ai-title">Expandir com IA</h2>
+        <div class="hud-hint" id="ai-source-info"></div>
+        <fieldset>
+          <legend>Direções</legend>
+          <div class="ai-grid" id="ai-directions"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Novo tamanho (px)</legend>
+          <div class="ai-size">
+            <label for="ai-width">Larg.</label>
+            <input type="number" id="ai-width" min="1" step="1">
+            <button type="button" class="btn" id="ai-lock" aria-pressed="true" aria-label="Manter proporção">🔒</button>
+            <label for="ai-height">Alt.</label>
+            <input type="number" id="ai-height" min="1" step="1">
+          </div>
+          <div class="hud-hint" id="ai-margins"></div>
+        </fieldset>
+        <fieldset>
+          <legend>Pincel</legend>
+          <div class="ai-tools">
+            <button type="button" class="btn" id="ai-brush-thin" aria-pressed="true">Fino</button>
+            <button type="button" class="btn" id="ai-brush-thick" aria-pressed="false">Grosso</button>
+            <span class="ai-tools" id="ai-colors"></span>
+            <button type="button" class="btn" id="ai-undo">Desfazer</button>
+            <button type="button" class="btn" id="ai-clear">Limpar</button>
+          </div>
+        </fieldset>
+        <label for="ai-prompt">Instrução</label>
+        <textarea id="ai-prompt" placeholder="Ex.: continue o terreno e o rio; verde = árvores; amarelo = poste de luz."></textarea>
+        <label for="ai-band">Faixa de transição: <span id="ai-band-val">32 px</span></label>
+        <input type="range" id="ai-band" min="0" max="128" step="1" value="32">
+        <div class="hud-hint">0 px = original 100% idêntico. A faixa suaviza a emenda só nas bordas expandidas.</div>
+        <label for="ai-key">Chave da API OpenAI</label>
+        <input type="password" id="ai-key" autocomplete="off" spellcheck="false">
+        <div class="hud-hint">Fica só nesta aba do navegador. Cada geração é cobrada na sua conta da API (≈ US$ 0,05 nos testes).</div>
+        <div id="ai-status" role="status"></div>
+        <div class="dialog-actions">
+          <button type="button" class="btn" id="ai-close">Fechar</button>
+          <button type="button" class="btn" id="ai-back" hidden>Voltar a editar</button>
+          <button type="button" class="btn" id="ai-compare" hidden>Ver original</button>
+          <button type="button" class="btn" id="ai-download" hidden>Baixar PNG</button>
+          <button type="button" class="btn" id="ai-generate">Gerar</button>
+          <button type="button" class="btn primary" id="ai-apply" hidden>Aplicar na camada</button>
+        </div>
+      </div>
     </div>
   </dialog>
 
