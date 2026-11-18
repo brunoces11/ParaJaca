@@ -140,8 +140,11 @@ test('configuration restores saved assets and accepts older configuration files'
       return element;
     },
   });
+  /** @type {string | null} */
+  let chosenName = 'Minha cena';
+  const testWindow = Object.assign(new EventTarget(), { prompt: () => chosenName });
   const globals = {
-    window: new EventTarget(), document: documentTarget,
+    window: testWindow, document: documentTarget,
     setInterval() { return 0; },
     __parajacaDemoTestPlayer: fakePlayer,
     fetch: async () => ({ ok: true, status: 200 }),
@@ -182,10 +185,14 @@ test('configuration restores saved assets and accepts older configuration files'
   input(child(child(row, 1), 2), '-1250');
   input(child(child(row, 2), 2), '2050');
   input(child(child(row, 3), 2), '66.6');
+  chosenName = null;
+  control('config-save').click();
+  assert.equal(download, null);
+  chosenName = 'Minha cena';
   control('config-save').click();
   assert.ok(download);
   const savedDownload = /** @type {{ href: string, name: string }} */ (download);
-  assert.equal(savedDownload.name, 'parajaca-configuracao.json');
+  assert.equal(savedDownload.name, 'Minha cena.json');
   const blob = resolveObjectURL(savedDownload.href);
   assert.ok(blob);
   const savedText = await blob.text();

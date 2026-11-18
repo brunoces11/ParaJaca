@@ -660,11 +660,19 @@ configSaveButton.addEventListener('click', () => {
     setConfigStatus('Cena sem variante disponível.', true);
     return;
   }
+  const inputName = window.prompt('Nome do arquivo:', 'parajaca-configuracao');
+  if (inputName === null) return;
+  const name = inputName.trim();
+  if (!name || /[<>:"/\\|?*\x00-\x1f]/.test(name) || /^\.+$/.test(name)) {
+    setConfigStatus('Informe um nome de arquivo válido.', true);
+    return;
+  }
+  const filename = /\.json$/i.test(name) ? name : `${name}.json`;
   const json = JSON.stringify(captureConfiguration(scene, variant), null, 2);
   const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
   const link = document.createElement('a');
   link.href = url;
-  link.download = 'parajaca-configuracao.json';
+  link.download = filename;
   document.body.appendChild(link);
   link.click();
   link.remove();
