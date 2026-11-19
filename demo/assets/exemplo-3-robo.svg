@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400">
+  <!-- Each animatable part is a group translated to its pivot point (shoulder, hip, neck, eye center). -->
+  <ellipse id="sombra" cx="200" cy="372" rx="78" ry="9" fill="#2B3A55" opacity="0.25"/>
+
+  <g id="brilho-grande" transform="translate(350 92)">
+    <polygon id="brilho-grande-forma" points="0,-14 4,-4 14,0 4,4 0,14 -4,4 -14,0 -4,-4" fill="#FFC145"/>
+  </g>
+  <g id="brilho-pequeno" transform="translate(338 150) scale(0.6)">
+    <polygon id="brilho-pequeno-forma" points="0,-14 4,-4 14,0 4,4 0,14 -4,4 -14,0 -4,-4" fill="#FFC145"/>
+  </g>
+
+  <g id="robo" transform="translate(200 20)">
+    <g id="perna-esquerda" transform="translate(-28 275)">
+      <rect id="perna-esquerda-forma" x="-10" y="0" width="20" height="62" rx="8" fill="#E8EEF2" stroke="#2B3A55" stroke-width="4"/>
+      <rect id="pe-esquerdo" x="-18" y="56" width="36" height="14" rx="7" fill="#2B3A55"/>
+    </g>
+    <g id="perna-direita" transform="translate(28 275)">
+      <rect id="perna-direita-forma" x="-10" y="0" width="20" height="62" rx="8" fill="#E8EEF2" stroke="#2B3A55" stroke-width="4"/>
+      <rect id="pe-direito" x="-18" y="56" width="36" height="14" rx="7" fill="#2B3A55"/>
+    </g>
+
+    <g id="braco-esquerdo" transform="translate(-66 178) rotate(10)">
+      <rect id="braco-esquerdo-forma" x="-9" y="0" width="18" height="56" rx="9" fill="#E8EEF2" stroke="#2B3A55" stroke-width="4"/>
+      <circle id="mao-esquerda" cx="0" cy="64" r="12" fill="#2EC4B6" stroke="#2B3A55" stroke-width="4"/>
+    </g>
+    <g id="braco-direito" transform="translate(66 178) rotate(-135)">
+      <rect id="braco-direito-forma" x="-9" y="0" width="18" height="48" rx="9" fill="#E8EEF2" stroke="#2B3A55" stroke-width="4"/>
+      <g id="antebraco-direito" transform="translate(0 44) rotate(-30)">
+        <rect id="antebraco-direito-forma" x="-8" y="0" width="16" height="40" rx="8" fill="#E8EEF2" stroke="#2B3A55" stroke-width="4"/>
+        <circle id="mao-direita" cx="0" cy="48" r="12" fill="#FF6B5B" stroke="#2B3A55" stroke-width="4"/>
+      </g>
+    </g>
+
+    <g id="corpo" transform="translate(0 220)">
+      <rect id="corpo-forma" x="-62" y="-60" width="124" height="120" rx="22" fill="#E8EEF2" stroke="#2B3A55" stroke-width="5"/>
+      <g id="painel" transform="translate(0 -6)">
+        <rect id="painel-tela" x="-36" y="-24" width="72" height="44" rx="8" fill="#2B3A55"/>
+        <circle id="coracao" cx="-18" cy="-2" r="7" fill="#FF6B5B"/>
+        <polyline id="onda" points="-4,-2 3,-12 10,6 17,-8 24,-2" fill="none" stroke="#2EC4B6" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      </g>
+      <circle id="botao-1" cx="-20" cy="36" r="5" fill="#FFC145"/>
+      <circle id="botao-2" cx="0" cy="36" r="5" fill="#2EC4B6"/>
+      <circle id="botao-3" cx="20" cy="36" r="5" fill="#FF6B5B"/>
+    </g>
+
+    <!-- Head pivot = neck base, so tilting the head keeps the neck attached. -->
+    <g id="cabeca" transform="translate(0 160)">
+      <rect id="pescoco" x="-12" y="-14" width="24" height="16" rx="4" fill="#2B3A55"/>
+      <circle id="orelha-esquerda" cx="-74" cy="-60" r="10" fill="#2EC4B6" stroke="#2B3A55" stroke-width="4"/>
+      <circle id="orelha-direita" cx="74" cy="-60" r="10" fill="#2EC4B6" stroke="#2B3A55" stroke-width="4"/>
+      <rect id="cabeca-forma" x="-70" y="-110" width="140" height="100" rx="28" fill="#E8EEF2" stroke="#2B3A55" stroke-width="5"/>
+      <rect id="visor" x="-52" y="-92" width="104" height="52" rx="20" fill="#2B3A55"/>
+      <g id="olhos" transform="translate(0 -66)">
+        <ellipse id="olho-esquerdo" transform="translate(-22 0)" cx="0" cy="0" rx="9" ry="11" fill="#2EC4B6"/>
+        <ellipse id="olho-direito" transform="translate(22 0)" cx="0" cy="0" rx="9" ry="11" fill="#2EC4B6"/>
+      </g>
+      <circle id="bochecha-esquerda" cx="-46" cy="-24" r="6" fill="#FF6B5B" opacity="0.6"/>
+      <circle id="bochecha-direita" cx="46" cy="-24" r="6" fill="#FF6B5B" opacity="0.6"/>
+      <path id="boca" d="M-14 -28 Q0 -18 14 -28" fill="none" stroke="#2B3A55" stroke-width="4" stroke-linecap="round"/>
+      <g id="antena" transform="translate(0 -110)">
+        <path id="antena-haste" d="M0 0 Q6 -16 0 -30" fill="none" stroke="#2B3A55" stroke-width="4" stroke-linecap="round"/>
+        <circle id="antena-luz" cx="0" cy="-36" r="8" fill="#FFC145" stroke="#2B3A55" stroke-width="3"/>
+      </g>
+    </g>
+  </g>
+</svg>

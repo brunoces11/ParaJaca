@@ -62,3 +62,16 @@ Precedência em caso de conflito:
 - Responda ao usuário em pt-BR, de forma direta.
 - Ao relatar, distinga o que foi verificado (check, testes) do que depende de teste visual/medição do usuário.
 - Ao fornecer comando para o usuário rodar no PowerShell, use uma única linha.
+
+## 6. Commit e push (full push commit automático)
+
+Este projeto autoriza commit e push automáticos para o GitHub.
+
+- Ao final de toda execução que alterar arquivos, faça o full push commit: `git add -A`, `git commit` e `git push origin main` (branch `main`, remoto `origin`).
+- Só faça o commit depois de concluir a tarefa e de passarem as verificações exigidas (ao fim de etapa, `npm run check`). Se o check falhar ou a tarefa ficar incompleta, não faça commit: relate o erro.
+- Mensagem personalizada, descrevendo a mudança, em inglês e no padrão do histórico: assunto curto no imperativo (ex.: `Add cursor-driven focus tracking`), com corpo opcional.
+- Antes do commit, confira `git status`. Não inclua arquivos com segredos (ex.: `.env`, chaves de API); se aparecer algum, pare e avise o usuário.
+- Não faça commit em interações sem alteração de arquivos (perguntas, análises, planejamento).
+- Nunca use `--force` nem `--no-verify`. Se o commit ou o push falhar, relate o erro exato.
+- Encerre a resposta confirmando ao usuário neste formato (neste projeto, substitui o formato da regra global):
+  "Fiz o que você pediu: <resumo curto do que foi feito>. Apliquei o full push commit no GitHub: `<hash curto>`, com a mensagem `<mensagem do commit>`."

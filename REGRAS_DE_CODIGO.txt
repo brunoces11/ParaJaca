@@ -43,6 +43,7 @@ Derivado de: ParaJaca — Blueprint do projeto v1.0
     {
       "name": "parajaca",
       "version": "0.1.0",
+      "license": "MIT",
       "private": true,
       "type": "module",
       "engines": { "node": ">=22" },
@@ -95,7 +96,7 @@ Derivado de: ParaJaca — Blueprint do projeto v1.0
 2.1 Estrutura alvo (arquivo só é criado na etapa que o implementa):
 
     parajaca/
-      package.json, tsconfig.json, vite.config.js, .gitignore
+      package.json, tsconfig.json, vite.config.js, .gitignore, LICENSE (MIT)
       AGENTS.md, BLUEPRINT.md, REGRAS_DE_CODIGO.txt, FASES_DE_IMPLEMENTACAO.txt
       src/core/errors.js
       src/core/scene/model.js

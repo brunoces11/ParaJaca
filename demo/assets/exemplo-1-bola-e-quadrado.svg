@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+  <!-- Each shape is translated to its own center, so scale and rotation pivot there. -->
+  <circle id="bola" transform="translate(130 150)" cx="0" cy="0" r="42" fill="#FF6B5B"/>
+  <rect id="quadrado" transform="translate(270 150)" x="-40" y="-40" width="80" height="80" rx="12" fill="#2EC4B6"/>
+</svg>

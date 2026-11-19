@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+  <!-- Flat on purpose (no <g>): shapes of the same part share one transform = the part pivot.
+       Give them identical keyframes and they move together. -->
+  <ellipse id="sombra" transform="translate(200 268)" cx="0" cy="0" rx="118" ry="10" fill="#000000" opacity="0.25"/>
+
+  <!-- Part "brilho" (pivot: chest center) -->
+  <path id="raio-esquerdo" transform="translate(200 150)" d="M-40 -20 L-78 -86" fill="none" stroke="#FFE08A" stroke-width="6"/>
+  <path id="raio-central" transform="translate(200 150)" d="M0 -24 L0 -104" fill="none" stroke="#FFE08A" stroke-width="8"/>
+  <path id="raio-direito" transform="translate(200 150)" d="M40 -20 L78 -86" fill="none" stroke="#FFE08A" stroke-width="6"/>
+
+  <!-- Part "moeda" (pivot: coin center, hidden behind the chest until animated) -->
+  <circle id="moeda-borda" transform="translate(200 150)" cx="0" cy="0" r="16" fill="#F2C14E" stroke="#B8892B" stroke-width="3"/>
+  <rect id="moeda-marca" transform="translate(200 150)" x="-3" y="-8" width="6" height="16" rx="3" fill="#B8892B"/>
+
+  <!-- Part "corpo" (pivot: body center) -->
+  <rect id="corpo-madeira" transform="translate(200 210)" x="-110" y="-50" width="220" height="100" rx="8" fill="#C98B55" stroke="#4A2E1A" stroke-width="4"/>
+  <rect id="corpo-faixa-esquerda" transform="translate(200 210)" x="-80" y="-50" width="20" height="100" fill="#8A5530"/>
+  <rect id="corpo-faixa-direita" transform="translate(200 210)" x="60" y="-50" width="20" height="100" fill="#8A5530"/>
+  <path id="corpo-veio" transform="translate(200 210)" d="M-50 -18 L-12 -18 M12 24 L50 24" fill="none" stroke="#4A2E1A" stroke-width="2" opacity="0.5"/>
+
+  <!-- Part "tampa" + "fecho" (pivot: hinge at the left end of the lid base) -->
+  <path id="tampa-madeira" transform="translate(90 160)" d="M0 0 L0 -30 Q0 -55 30 -55 L190 -55 Q220 -55 220 -30 L220 0 Z" fill="#D99A62" stroke="#4A2E1A" stroke-width="4"/>
+  <rect id="tampa-faixa-esquerda" transform="translate(90 160)" x="30" y="-55" width="20" height="55" fill="#8A5530"/>
+  <rect id="tampa-faixa-direita" transform="translate(90 160)" x="170" y="-55" width="20" height="55" fill="#8A5530"/>
+  <rect id="fecho-placa" transform="translate(90 160)" x="95" y="-14" width="30" height="32" rx="5" fill="#F2C14E" stroke="#4A2E1A" stroke-width="3"/>
+  <circle id="fecho-buraco" transform="translate(90 160)" cx="110" cy="0" r="4" fill="#4A2E1A"/>
+  <rect id="fecho-fenda" transform="translate(90 160)" x="108.5" y="2" width="3" height="8" fill="#4A2E1A"/>
+</svg>
